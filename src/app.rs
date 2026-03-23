@@ -126,11 +126,22 @@ pub struct App {
     // Background detail fetching
     detail_queue: VecDeque<DetailFetch>,
     detail_cache: HashMap<String, WorkItemDetail>,
+    // Background project/ticket loading
+    projects_receiver: Option<mpsc::Receiver<anyhow::Result<Vec<JiraProject>>>>,
+    tickets_receiver: Option<TicketsReceiver>,
+    start_receiver: Option<mpsc::Receiver<Result<String, String>>>,
     // Config
     #[allow(dead_code)]
     pub config: LazyJiraConfig,
     // Start-ticket popup
     pub start_popup: Option<StartPopup>,
+}
+
+struct TicketsReceiver {
+    rx: mpsc::Receiver<anyhow::Result<Vec<WorkItem>>>,
+    is_refresh: bool,
+    prev_column: usize,
+    prev_ticket: usize,
 }
 
 pub struct StartPopup {
@@ -170,20 +181,44 @@ impl App {
             epics_receiver: None,
             detail_queue: VecDeque::new(),
             detail_cache: HashMap::new(),
+            projects_receiver: None,
+            tickets_receiver: None,
+            start_receiver: None,
             config: LazyJiraConfig::load(),
             start_popup: None,
         }
     }
 
     pub fn load_projects(&mut self) {
-        self.loading_projects = false;
-        match jira::fetch_projects() {
-            Ok(projects) => {
+        self.loading_projects = true;
+        let (tx, rx) = mpsc::channel();
+        self.projects_receiver = Some(rx);
+        thread::spawn(move || {
+            let _ = tx.send(jira::fetch_projects());
+        });
+    }
+
+    pub fn poll_projects(&mut self) {
+        let rx = match &self.projects_receiver {
+            Some(rx) => rx,
+            None => return,
+        };
+        match rx.try_recv() {
+            Ok(Ok(projects)) => {
                 self.projects = projects;
                 self.project_index = 0;
+                self.loading_projects = false;
+                self.projects_receiver = None;
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 self.status_message = format!("Error: {}", e);
+                self.loading_projects = false;
+                self.projects_receiver = None;
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.loading_projects = false;
+                self.projects_receiver = None;
             }
         }
     }
@@ -192,37 +227,89 @@ impl App {
         if self.projects.is_empty() {
             return;
         }
-        let project_key = &self.projects[self.project_index].key.clone();
+        let project_key = self.projects[self.project_index].key.clone();
         self.status_message = format!("Loading tickets for {}...", project_key);
+        self.loading_tickets = true;
+        let epic = self.selected_epic.clone();
+        let (tx, rx) = mpsc::channel();
+        self.tickets_receiver = Some(TicketsReceiver {
+            rx,
+            is_refresh: false,
+            prev_column: 0,
+            prev_ticket: 0,
+        });
+        thread::spawn(move || {
+            let _ = tx.send(jira::fetch_workitems(&project_key, epic.as_deref()));
+        });
+    }
 
-        match jira::fetch_workitems(project_key, self.selected_epic.as_deref()) {
-            Ok(items) => {
-                self.build_columns(items);
-                self.column_index = 0;
-                self.ticket_index = 0;
-                self.detail = None;
-                self.editable_fields.clear();
-                self.detail_mode = DetailMode::Viewing;
-                self.detail_cache.clear();
-                self.detail_queue.clear();
-                self.loading_detail = false;
-                self.active_pane = Pane::Tickets;
-                self.last_tickets_refresh = Some(Instant::now());
-                self.status_message = format!(
-                    "{} tickets in {} columns",
-                    self.columns.iter().map(|c| c.items.len()).sum::<usize>(),
-                    self.columns.len()
-                );
-                // Start background epic fetch if not already loaded
-                if self.epics.is_empty() && !self.loading_epics {
-                    self.start_epic_fetch(project_key);
-                }
-                // Auto-fetch detail for first ticket
-                self.request_current_detail();
+    fn handle_workitems_result(&mut self, items: Vec<WorkItem>, is_refresh: bool, prev_column: usize, prev_ticket: usize) {
+        self.build_columns(items);
+        if is_refresh {
+            self.column_index = prev_column.min(self.columns.len().saturating_sub(1));
+            let ticket_count = self.current_tickets().len();
+            self.ticket_index = prev_ticket.min(ticket_count.saturating_sub(1));
+            self.last_tickets_refresh = Some(Instant::now());
+            self.status_message = format!(
+                "{} tickets in {} columns (refreshed)",
+                self.columns.iter().map(|c| c.items.len()).sum::<usize>(),
+                self.columns.len()
+            );
+        } else {
+            self.column_index = 0;
+            self.ticket_index = 0;
+            self.detail = None;
+            self.editable_fields.clear();
+            self.detail_mode = DetailMode::Viewing;
+            self.detail_cache.clear();
+            self.detail_queue.clear();
+            self.loading_detail = false;
+            self.active_pane = Pane::Tickets;
+            self.last_tickets_refresh = Some(Instant::now());
+            self.status_message = format!(
+                "{} tickets in {} columns",
+                self.columns.iter().map(|c| c.items.len()).sum::<usize>(),
+                self.columns.len()
+            );
+            // Start background epic fetch if not already loaded
+            let project_key = self.projects[self.project_index].key.clone();
+            if self.epics.is_empty() && !self.loading_epics {
+                self.start_epic_fetch(&project_key);
             }
-            Err(e) => {
-                self.columns.clear();
-                self.status_message = format!("Error: {}", e);
+            // Auto-fetch detail for first ticket
+            self.request_current_detail();
+        }
+    }
+
+    pub fn poll_tickets(&mut self) {
+        let tr = match &self.tickets_receiver {
+            Some(tr) => tr,
+            None => return,
+        };
+        match tr.rx.try_recv() {
+            Ok(Ok(items)) => {
+                let is_refresh = tr.is_refresh;
+                let prev_column = tr.prev_column;
+                let prev_ticket = tr.prev_ticket;
+                self.tickets_receiver = None;
+                self.loading_tickets = false;
+                self.handle_workitems_result(items, is_refresh, prev_column, prev_ticket);
+            }
+            Ok(Err(e)) => {
+                let is_refresh = tr.is_refresh;
+                self.tickets_receiver = None;
+                self.loading_tickets = false;
+                if is_refresh {
+                    self.status_message = format!("Refresh error: {}", e);
+                } else {
+                    self.columns.clear();
+                    self.status_message = format!("Error: {}", e);
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.loading_tickets = false;
+                self.tickets_receiver = None;
             }
         }
     }
@@ -271,24 +358,18 @@ impl App {
         let project_key = self.projects[self.project_index].key.clone();
         let prev_column = self.column_index;
         let prev_ticket = self.ticket_index;
-
-        match jira::fetch_workitems(&project_key, self.selected_epic.as_deref()) {
-            Ok(items) => {
-                self.build_columns(items);
-                self.column_index = prev_column.min(self.columns.len().saturating_sub(1));
-                let ticket_count = self.current_tickets().len();
-                self.ticket_index = prev_ticket.min(ticket_count.saturating_sub(1));
-                self.last_tickets_refresh = Some(Instant::now());
-                self.status_message = format!(
-                    "{} tickets in {} columns (refreshed)",
-                    self.columns.iter().map(|c| c.items.len()).sum::<usize>(),
-                    self.columns.len()
-                );
-            }
-            Err(e) => {
-                self.status_message = format!("Refresh error: {}", e);
-            }
-        }
+        self.loading_tickets = true;
+        let epic = self.selected_epic.clone();
+        let (tx, rx) = mpsc::channel();
+        self.tickets_receiver = Some(TicketsReceiver {
+            rx,
+            is_refresh: true,
+            prev_column,
+            prev_ticket,
+        });
+        thread::spawn(move || {
+            let _ = tx.send(jira::fetch_workitems(&project_key, epic.as_deref()));
+        });
     }
 
     pub fn needs_auto_refresh(&self) -> bool {
@@ -506,7 +587,7 @@ impl App {
         });
     }
 
-    /// Actually performs the start-ticket work (blocking). Updates the popup with the result.
+    /// Spawns the start-ticket work in a background thread.
     pub fn run_start_ticket(&mut self) {
         let popup = match self.start_popup.as_ref() {
             Some(p) => p,
@@ -522,29 +603,46 @@ impl App {
             .fields
             .issuetype
             .as_ref()
-            .map(|t| t.name.as_str())
-            .unwrap_or("Task");
+            .map(|t| t.name.clone())
+            .unwrap_or_else(|| "Task".to_string());
+        let config = self.config.clone();
 
-        // Step 1: Assign + transition
-        if let Err(e) = jira::start_workitem(&key) {
-            self.start_popup.as_mut().unwrap().result =
-                Some(Err(format!("Failed to start ticket: {}", e)));
-            return;
-        }
+        let (tx, rx) = mpsc::channel();
+        self.start_receiver = Some(rx);
+        thread::spawn(move || {
+            let result = (|| {
+                jira::start_workitem(&key)
+                    .map_err(|e| format!("Failed to start ticket: {}", e))?;
+                crate::worktree::create_worktree(&key, &issue_type, &config)
+                    .map_err(|e| format!("Ticket started but worktree failed: {}", e))
+            })();
+            let _ = tx.send(result);
+        });
+    }
 
-        // Step 2: Create worktree
-        match crate::worktree::create_worktree(&key, issue_type, &self.config) {
-            Ok(path) => {
-                self.start_popup.as_mut().unwrap().result = Some(Ok(path));
+    pub fn poll_start_ticket(&mut self) {
+        let rx = match &self.start_receiver {
+            Some(rx) => rx,
+            None => return,
+        };
+        match rx.try_recv() {
+            Ok(result) => {
+                if let Some(popup) = self.start_popup.as_mut() {
+                    if result.is_ok() {
+                        self.detail_cache.remove(&popup.ticket_key);
+                    }
+                    popup.result = Some(result);
+                }
+                self.start_receiver = None;
             }
-            Err(e) => {
-                self.start_popup.as_mut().unwrap().result =
-                    Some(Err(format!("Ticket started but worktree failed: {}", e)));
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                if let Some(popup) = self.start_popup.as_mut() {
+                    popup.result = Some(Err("Background task disconnected".to_string()));
+                }
+                self.start_receiver = None;
             }
         }
-
-        // Invalidate cache
-        self.detail_cache.remove(&key);
     }
 
     pub fn close_start_popup(&mut self) {
@@ -744,7 +842,6 @@ impl App {
     pub fn perform_pending_load(&mut self) {
         if self.loading_tickets {
             self.load_workitems();
-            self.loading_tickets = false;
         }
         if self.loading_detail {
             self.load_detail();

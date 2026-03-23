@@ -37,39 +37,30 @@ fn main() -> Result<()> {
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     let mut app = App::new();
-    app.loading_projects = true;
-    terminal.draw(|f| ui::draw(f, &app))?;
     app.load_projects();
 
-    // Show projects, then load first project's tickets
-    if !app.projects.is_empty() {
-        app.loading_tickets = true;
-        terminal.draw(|f| ui::draw(f, &app))?;
-        app.load_workitems();
-        app.loading_tickets = false;
-    }
+    let mut projects_loaded = false;
 
     loop {
         terminal.draw(|f| ui::draw(f, &app))?;
 
-        // Poll with 1s timeout so we can check auto-refresh
-        if event::poll(Duration::from_secs(1))? {
+        // Poll with short timeout so background tasks stay responsive
+        if event::poll(Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
 
-                if app.start_popup.is_some() {
+                // q always quits, regardless of loading state
+                if key.code == KeyCode::Char('q') && !app.is_editing() && !app.is_insert_mode() {
+                    app.should_quit = true;
+                } else if app.start_popup.is_some() {
                     // Start-ticket popup: if result is set, any key dismisses
                     if app.start_popup.as_ref().unwrap().result.is_some() {
                         let was_ok = app.start_popup.as_ref().unwrap().result.as_ref().unwrap().is_ok();
                         app.close_start_popup();
                         if was_ok {
-                            // Refresh tickets to reflect status change
-                            app.loading_tickets = true;
-                            terminal.draw(|f| ui::draw(f, &app))?;
                             app.refresh_workitems();
-                            app.loading_tickets = false;
                         }
                     }
                 } else if app.show_epic_popup {
@@ -78,10 +69,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         KeyCode::Down => app.epic_popup_down(),
                         KeyCode::Enter => {
                             if app.select_epic() {
-                                app.loading_tickets = true;
-                                terminal.draw(|f| ui::draw(f, &app))?;
                                 app.load_workitems();
-                                app.loading_tickets = false;
                             }
                         }
                         KeyCode::Esc => app.close_epic_popup(),
@@ -151,9 +139,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                 } else {
                     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
                     match key.code {
-                        KeyCode::Char('q') => {
-                            app.should_quit = true;
-                        }
+                        KeyCode::Char('q') => {} // handled above
                         KeyCode::Up if shift => {
                             app.set_ticket_sort(app::TicketSort::KeyAsc);
                         }
@@ -169,7 +155,6 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         KeyCode::Right => app.move_right(),
                         KeyCode::Enter => {
                             if app.enter() {
-                                terminal.draw(|f| ui::draw(f, &app))?;
                                 app.perform_pending_load();
                             }
                         }
@@ -186,10 +171,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         }
                         KeyCode::Char('r') => {
                             if app.active_pane == app::Pane::Tickets {
-                                app.loading_tickets = true;
-                                terminal.draw(|f| ui::draw(f, &app))?;
                                 app.refresh_workitems();
-                                app.loading_tickets = false;
                             }
                         }
                         KeyCode::Char('C') => {
@@ -209,7 +191,6 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         KeyCode::Char('s') => {
                             if app.start_current_ticket() {
                                 app.open_start_popup();
-                                terminal.draw(|f| ui::draw(f, &app))?;
                                 app.run_start_ticket();
                             }
                         }
@@ -219,9 +200,19 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
             }
         }
 
-        // Poll background fetches
+        // Poll all background tasks
+        let had_projects = !app.projects.is_empty();
+        app.poll_projects();
+        app.poll_tickets();
         app.poll_details();
         app.poll_epics();
+        app.poll_start_ticket();
+
+        // Once projects finish loading for the first time, load tickets
+        if !projects_loaded && !app.projects.is_empty() && !had_projects {
+            projects_loaded = true;
+            app.load_workitems();
+        }
 
         // Auto-refresh every 5 minutes
         if app.needs_auto_refresh() {
