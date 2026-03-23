@@ -95,8 +95,32 @@ pub fn fetch_projects() -> Result<Vec<JiraProject>> {
     Ok(projects)
 }
 
-pub fn fetch_workitems(project_key: &str) -> Result<Vec<WorkItem>> {
-    let jql = format!("project = {} ORDER BY rank", project_key);
+pub fn fetch_workitems(project_key: &str, epic_key: Option<&str>) -> Result<Vec<WorkItem>> {
+    let jql = match epic_key {
+        Some(key) => format!("project = {} AND parent = {} ORDER BY rank", project_key, key),
+        None => format!("project = {} ORDER BY rank", project_key),
+    };
+    let json = run_acli(&[
+        "jira",
+        "workitem",
+        "search",
+        "--jql",
+        &jql,
+        "--fields",
+        "key,status,summary,assignee,issuetype,priority",
+        "--limit",
+        "200",
+        "--json",
+    ])?;
+    let items: Vec<WorkItem> = serde_json::from_str(&json)?;
+    Ok(items)
+}
+
+pub fn fetch_epics(project_key: &str) -> Result<Vec<WorkItem>> {
+    let jql = format!(
+        "project = {} AND issuetype = Epic AND statusCategory != Done ORDER BY rank",
+        project_key
+    );
     let json = run_acli(&[
         "jira",
         "workitem",

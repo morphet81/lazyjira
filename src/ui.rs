@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
@@ -20,12 +20,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     let left_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Percentage(33), Constraint::Percentage(67)])
         .split(main_chunks[0]);
 
     draw_projects(frame, app, left_chunks[0]);
     draw_tickets(frame, app, left_chunks[1]);
     draw_detail(frame, app, main_chunks[1]);
+
+    if app.show_epic_popup {
+        draw_epic_popup(frame, app, left_chunks[1]);
+    }
 }
 
 fn focused_border_style(app: &App, pane: Pane) -> Style {
@@ -84,15 +88,20 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_tickets(frame: &mut Frame, app: &App, area: Rect) {
+    let epic_label = app
+        .selected_epic
+        .as_deref()
+        .unwrap_or("All");
     let title = if app.columns.is_empty() {
         " [2] Tickets ".to_string()
     } else {
         format!(
-            " [2] ◀ {} ▶  ({}/{}) [{}] ",
+            " [2] ◀ {} ▶  ({}/{}) [{}] [{}] ",
             app.current_column_name(),
             app.column_index + 1,
             app.columns.len(),
-            app.ticket_sort.label()
+            app.ticket_sort.label(),
+            epic_label,
         )
     };
 
@@ -128,7 +137,7 @@ fn draw_tickets(frame: &mut Frame, app: &App, area: Rect) {
 
     // Hint bar
     if app.active_pane == Pane::Tickets {
-        let hint = Paragraph::new(" ◀▶ columns | ↑↓ select | S-↑↓ sort key | P priority | r refresh")
+        let hint = Paragraph::new(" ◀▶ columns | ↑↓ select | e epics | S-↑↓ sort | P priority | r refresh")
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(hint, hint_area);
     }
@@ -452,6 +461,61 @@ fn build_detail_title<'a>(
             ])
         }
     }
+}
+
+fn draw_epic_popup(frame: &mut Frame, app: &App, pane2_area: Rect) {
+    // Centered within pane 2
+    let popup_width = pane2_area.width.saturating_sub(4).min(50);
+    let popup_height = (app.epics.len() as u16 + 3).min(20).min(pane2_area.height.saturating_sub(2));
+    let x = pane2_area.x + (pane2_area.width.saturating_sub(popup_width)) / 2;
+    let y = pane2_area.y + (pane2_area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title(" Epic Filter ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    if app.loading_epics {
+        let loading = Paragraph::new("Loading epics...")
+            .block(block)
+            .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(loading, popup_area);
+        return;
+    }
+
+    // Build items: "All epics" + each epic
+    let mut items: Vec<ListItem> = Vec::new();
+    items.push(ListItem::new(Line::from(Span::styled(
+        "All epics",
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+    ))));
+
+    for epic in &app.epics {
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(&epic.key, Style::default().fg(Color::Yellow)),
+            Span::raw(" "),
+            Span::raw(truncate(
+                &epic.fields.summary,
+                popup_width.saturating_sub(epic.key.len() as u16 + 5) as usize,
+            )),
+        ])));
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▸ ");
+
+    let mut state = ListState::default();
+    state.select(Some(app.epic_popup_index));
+    frame.render_stateful_widget(list, popup_area, &mut state);
 }
 
 fn truncate(s: &str, max: usize) -> String {

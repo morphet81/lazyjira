@@ -57,7 +57,22 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                     continue;
                 }
 
-                if app.is_insert_mode() {
+                if app.show_epic_popup {
+                    match key.code {
+                        KeyCode::Up => app.epic_popup_up(),
+                        KeyCode::Down => app.epic_popup_down(),
+                        KeyCode::Enter => {
+                            if app.select_epic() {
+                                app.loading_tickets = true;
+                                terminal.draw(|f| ui::draw(f, &app))?;
+                                app.load_workitems();
+                                app.loading_tickets = false;
+                            }
+                        }
+                        KeyCode::Esc => app.close_epic_popup(),
+                        _ => {}
+                    }
+                } else if app.is_insert_mode() {
                     // Vi INSERT mode
                     match key.code {
                         KeyCode::Esc => app.exit_insert_mode(),
@@ -147,7 +162,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         KeyCode::Char('1') => app.select_pane(1),
                         KeyCode::Char('2') => app.select_pane(2),
                         KeyCode::Char('3') => app.select_pane(3),
-                        KeyCode::Char('e') => app.start_editing(),
+                        KeyCode::Char('e') => {
+                            if app.active_pane == app::Pane::Tickets {
+                                app.open_epic_popup();
+                            } else {
+                                app.start_editing();
+                            }
+                        }
                         KeyCode::Char('r') => {
                             if app.active_pane == app::Pane::Tickets {
                                 app.loading_tickets = true;
@@ -161,6 +182,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                 }
             }
         }
+
+        // Poll background epic fetch
+        app.poll_epics();
 
         // Auto-refresh every 5 minutes
         if app.needs_auto_refresh() {

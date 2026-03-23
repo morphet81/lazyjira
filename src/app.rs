@@ -2,6 +2,7 @@ use crate::adf;
 use crate::jira::{self, JiraProject, WorkItem, WorkItemDetail};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// Compare Jira issue keys naturally: "NERO-2" < "NERO-10".
@@ -104,6 +105,13 @@ pub struct App {
     pub save_status: Option<SaveStatus>,
     pub last_tickets_refresh: Option<Instant>,
     pub pending_d: bool, // for vi "dd" command
+    // Epic filter
+    pub show_epic_popup: bool,
+    pub epics: Vec<WorkItem>,
+    pub epic_popup_index: usize,
+    pub selected_epic: Option<String>,
+    pub loading_epics: bool,
+    epics_receiver: Option<mpsc::Receiver<anyhow::Result<Vec<WorkItem>>>>,
 }
 
 impl App {
@@ -130,6 +138,12 @@ impl App {
             save_status: None,
             last_tickets_refresh: None,
             pending_d: false,
+            show_epic_popup: false,
+            epics: Vec::new(),
+            epic_popup_index: 0,
+            selected_epic: None,
+            loading_epics: false,
+            epics_receiver: None,
         }
     }
 
@@ -153,7 +167,7 @@ impl App {
         let project_key = &self.projects[self.project_index].key.clone();
         self.status_message = format!("Loading tickets for {}...", project_key);
 
-        match jira::fetch_workitems(project_key) {
+        match jira::fetch_workitems(project_key, self.selected_epic.as_deref()) {
             Ok(items) => {
                 self.build_columns(items);
                 self.column_index = 0;
@@ -168,10 +182,50 @@ impl App {
                     self.columns.iter().map(|c| c.items.len()).sum::<usize>(),
                     self.columns.len()
                 );
+                // Start background epic fetch if not already loaded
+                if self.epics.is_empty() && !self.loading_epics {
+                    self.start_epic_fetch(project_key);
+                }
             }
             Err(e) => {
                 self.columns.clear();
                 self.status_message = format!("Error: {}", e);
+            }
+        }
+    }
+
+    fn start_epic_fetch(&mut self, project_key: &str) {
+        self.loading_epics = true;
+        let key = project_key.to_string();
+        let (tx, rx) = mpsc::channel();
+        self.epics_receiver = Some(rx);
+        std::thread::spawn(move || {
+            let result = jira::fetch_epics(&key);
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Poll for background epic fetch completion. Call from the event loop.
+    pub fn poll_epics(&mut self) {
+        if let Some(rx) = &self.epics_receiver {
+            match rx.try_recv() {
+                Ok(Ok(mut epics)) => {
+                    epics.sort_by(|a, b| cmp_issue_key(&a.key, &b.key));
+                    self.epics = epics;
+                    self.loading_epics = false;
+                    self.epics_receiver = None;
+                }
+                Ok(Err(_)) => {
+                    self.loading_epics = false;
+                    self.epics_receiver = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    // Still loading
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.loading_epics = false;
+                    self.epics_receiver = None;
+                }
             }
         }
     }
@@ -185,7 +239,7 @@ impl App {
         let prev_column = self.column_index;
         let prev_ticket = self.ticket_index;
 
-        match jira::fetch_workitems(&project_key) {
+        match jira::fetch_workitems(&project_key, self.selected_epic.as_deref()) {
             Ok(items) => {
                 self.build_columns(items);
                 self.column_index = prev_column.min(self.columns.len().saturating_sub(1));
@@ -471,6 +525,10 @@ impl App {
                 self.columns.clear();
                 self.detail = None;
                 self.editable_fields.clear();
+                self.epics.clear();
+                self.selected_epic = None;
+                self.loading_epics = false;
+                self.epics_receiver = None;
                 self.active_pane = Pane::Tickets;
                 true
             }
@@ -510,6 +568,65 @@ impl App {
             3 => Pane::Detail,
             _ => return,
         };
+    }
+
+    // --- Epic popup ---
+
+    pub fn open_epic_popup(&mut self) {
+        if self.active_pane != Pane::Tickets || self.projects.is_empty() {
+            return;
+        }
+        // If epics not loaded and not currently loading, start fetch
+        if self.epics.is_empty() && !self.loading_epics {
+            let project_key = self.projects[self.project_index].key.clone();
+            self.start_epic_fetch(&project_key);
+        }
+        self.show_epic_popup = true;
+        // Set popup index to current selection
+        self.epic_popup_index = match &self.selected_epic {
+            None => 0,
+            Some(key) => self
+                .epics
+                .iter()
+                .position(|e| &e.key == key)
+                .map(|i| i + 1) // +1 for "All epics"
+                .unwrap_or(0),
+        };
+    }
+
+    pub fn close_epic_popup(&mut self) {
+        self.show_epic_popup = false;
+    }
+
+    /// Select epic from popup. Returns true if filter changed (needs reload).
+    pub fn select_epic(&mut self) -> bool {
+        self.show_epic_popup = false;
+        let new_epic = if self.epic_popup_index == 0 {
+            None
+        } else {
+            self.epics
+                .get(self.epic_popup_index - 1)
+                .map(|e| e.key.clone())
+        };
+        if new_epic != self.selected_epic {
+            self.selected_epic = new_epic;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn epic_popup_up(&mut self) {
+        if self.epic_popup_index > 0 {
+            self.epic_popup_index -= 1;
+        }
+    }
+
+    pub fn epic_popup_down(&mut self) {
+        let max = self.epics.len(); // 0 = "All epics", so max index = epics.len()
+        if self.epic_popup_index < max {
+            self.epic_popup_index += 1;
+        }
     }
 
     // --- Edit mode ---
