@@ -6,16 +6,14 @@ use std::process::Command;
 use crate::config::LazyJiraConfig;
 
 /// Create a git worktree for a ticket, copy files, and run setup commands.
+/// `commit_type` is a conventional commit key (e.g. "feat", "fix", "refactor").
 /// Returns the worktree path on success.
-pub fn create_worktree(key: &str, issue_type: &str, config: &LazyJiraConfig) -> Result<String> {
-    let type_prefix = if issue_type.eq_ignore_ascii_case("bug") {
-        "fix"
-    } else {
-        "feat"
-    };
-    let branch = format!("{}/{}{}", type_prefix, config.worktree_prefix, key);
+pub fn create_worktree(key: &str, commit_type: &str, config: &LazyJiraConfig) -> Result<String> {
+    let key_lower = key.to_lowercase();
+    let folder_name = format!("{}{}-{}", config.worktree_folder_prefix, commit_type, key_lower);
+    let branch = format!("{}{}/{}", config.worktree_branch_prefix, commit_type, key_lower);
     let base_dir = Path::new(&config.worktree_dir);
-    let worktree_path = base_dir.join(key);
+    let worktree_path = base_dir.join(&folder_name);
 
     // Create the worktree with a new branch
     let output = Command::new("git")

@@ -11,9 +11,13 @@ pub struct LazyJiraConfig {
     #[serde(default = "default_worktree_dir")]
     pub worktree_dir: String,
 
+    /// Prefix prepended to worktree folder names (e.g. "myproject-").
+    #[serde(default)]
+    pub worktree_folder_prefix: String,
+
     /// Prefix prepended to worktree branch names (e.g. "myproject-").
     #[serde(default)]
-    pub worktree_prefix: String,
+    pub worktree_branch_prefix: String,
 
     /// Files or glob patterns to copy from the project root to a new worktree.
     #[serde(default)]
@@ -33,9 +37,13 @@ const EXAMPLE_CONFIG: &str = r#"# lazyjira configuration
 # Directory where worktrees are created (default: current folder).
 # worktree_dir = ".."
 
+# Prefix prepended to worktree folder names (default: empty).
+# Example: with prefix "myproject-", folder becomes "myproject-feat-proj-123".
+# worktree_folder_prefix = ""
+
 # Prefix prepended to worktree branch names (default: empty).
-# Example: with prefix "myproject-", branch becomes "feat/myproject-PROJ-123".
-# worktree_prefix = ""
+# Example: with prefix "myproject-", branch becomes "myproject-feat/proj-123".
+# worktree_branch_prefix = ""
 
 # Files or glob patterns to copy from the project root into new worktrees.
 # Example: copy environment and IDE config files.

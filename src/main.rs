@@ -55,12 +55,32 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                 if key.code == KeyCode::Char('q') && !app.is_editing() && !app.is_insert_mode() {
                     app.should_quit = true;
                 } else if app.start_popup.is_some() {
-                    // Start-ticket popup: if result is set, any key dismisses
-                    if app.start_popup.as_ref().unwrap().result.is_some() {
-                        let was_ok = app.start_popup.as_ref().unwrap().result.as_ref().unwrap().is_ok();
-                        app.close_start_popup();
-                        if was_ok {
-                            app.refresh_workitems();
+                    match &app.start_popup.as_ref().unwrap().phase {
+                        app::StartPopupPhase::ChoosingType { .. } => {
+                            match key.code {
+                                KeyCode::Up => app.start_popup_up(),
+                                KeyCode::Down => app.start_popup_down(),
+                                KeyCode::Enter => {
+                                    app.start_popup_confirm();
+                                    app.run_start_ticket();
+                                }
+                                KeyCode::Esc => app.close_start_popup(),
+                                _ => {}
+                            }
+                        }
+                        app::StartPopupPhase::Creating { .. } => {
+                            // In progress — ignore keys
+                        }
+                        app::StartPopupPhase::Done(_) => {
+                            // Any key dismisses
+                            let was_ok = matches!(
+                                &app.start_popup.as_ref().unwrap().phase,
+                                app::StartPopupPhase::Done(Ok(_))
+                            );
+                            app.close_start_popup();
+                            if was_ok {
+                                app.refresh_workitems();
+                            }
                         }
                     }
                 } else if app.show_epic_popup {
@@ -191,7 +211,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         KeyCode::Char('s') => {
                             if app.start_current_ticket() {
                                 app.open_start_popup();
-                                app.run_start_ticket();
+                                // For bugs, auto-start (no type selection needed)
+                                if matches!(
+                                    app.start_popup.as_ref().map(|p| &p.phase),
+                                    Some(app::StartPopupPhase::Creating { .. })
+                                ) {
+                                    app.run_start_ticket();
+                                }
                             }
                         }
                         _ => {}

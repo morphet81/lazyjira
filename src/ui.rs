@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, Pane, SaveStatus, StartPopup};
+use crate::app::{App, Pane, SaveStatus, StartPopup, StartPopupPhase, COMMIT_TYPES};
 
 const LEFT_WIDTH: u16 = 60;
 
@@ -523,24 +523,71 @@ fn draw_epic_popup(frame: &mut Frame, app: &App, pane2_area: Rect) {
 }
 
 fn draw_start_popup(frame: &mut Frame, popup: &StartPopup, area: Rect) {
-    let (title, body, color) = match &popup.result {
-        None => (
-            " Starting ticket ",
-            format!("Creating worktree for {}...", popup.ticket_key),
-            Color::Yellow,
-        ),
-        Some(Ok(path)) => (
-            " Success ",
-            format!("Worktree created at:\n{}\n\nPress any key to close", path),
-            Color::Green,
-        ),
-        Some(Err(e)) => (
-            " Error ",
-            format!("{}\n\nPress any key to close", e),
-            Color::Red,
-        ),
-    };
+    match &popup.phase {
+        StartPopupPhase::ChoosingType { selected } => {
+            let title = format!(" Start {} — choose type ", popup.ticket_key);
+            let popup_width = area.width.min(40).max(25);
+            let popup_height = (COMMIT_TYPES.len() as u16 + 4).min(area.height.saturating_sub(2));
+            let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+            let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+            let popup_area = Rect::new(x, y, popup_width, popup_height);
 
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan));
+
+            let items: Vec<ListItem> = COMMIT_TYPES
+                .iter()
+                .map(|t| ListItem::new(Line::from(Span::raw(*t))))
+                .collect();
+
+            let list = List::new(items)
+                .block(block)
+                .highlight_style(
+                    Style::default()
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .highlight_symbol("▸ ");
+
+            let mut state = ListState::default();
+            state.select(Some(*selected));
+            frame.render_stateful_widget(list, popup_area, &mut state);
+        }
+        StartPopupPhase::Creating { .. } => {
+            draw_start_message(
+                frame,
+                area,
+                " Starting ticket ",
+                &format!("Creating worktree for {}...", popup.ticket_key),
+                Color::Yellow,
+            );
+        }
+        StartPopupPhase::Done(Ok(path)) => {
+            draw_start_message(
+                frame,
+                area,
+                " Success ",
+                &format!("Worktree created at:\n{}\n\nPress any key to close", path),
+                Color::Green,
+            );
+        }
+        StartPopupPhase::Done(Err(e)) => {
+            draw_start_message(
+                frame,
+                area,
+                " Error ",
+                &format!("{}\n\nPress any key to close", e),
+                Color::Red,
+            );
+        }
+    }
+}
+
+fn draw_start_message(frame: &mut Frame, area: Rect, title: &str, body: &str, color: Color) {
     let body_lines = body.lines().count() as u16;
     let popup_width = area.width.min(60).max(30);
     let popup_height = (body_lines + 4).min(area.height.saturating_sub(2));
@@ -555,7 +602,7 @@ fn draw_start_popup(frame: &mut Frame, popup: &StartPopup, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(color));
 
-    let content = Paragraph::new(body)
+    let content = Paragraph::new(body.to_string())
         .block(block)
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(Color::White));

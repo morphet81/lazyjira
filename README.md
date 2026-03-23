@@ -100,7 +100,12 @@ The interface has three panes: **Projects** (1), **Tickets** (2), and **Detail**
 
 | Key | Description |
 |-----|-------------|
+| `Up` / `Down` | Navigate commit type list |
+| `Enter` | Confirm selected type and start |
+| `Esc` | Cancel |
 | Any key | Dismiss popup (after operation completes) |
+
+For bug tickets, the type is automatically set to `fix`. For all other ticket types, a popup lets you choose a conventional commit type (`feat`, `fix`, `refactor`, `chore`, etc.).
 
 ## Configuration
 
@@ -111,7 +116,8 @@ Lazyjira reads an optional `.lazyjira` file (TOML) from the working directory. P
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `worktree_dir` | string | `"."` | Directory where git worktrees are created. |
-| `worktree_prefix` | string | `""` | Prefix prepended to worktree branch names. For example, with prefix `"myproject-"` the branch becomes `feat/myproject-PROJ-123`. |
+| `worktree_folder_prefix` | string | `""` | Prefix prepended to worktree folder names. E.g. with `"myproject-"`, folder becomes `myproject-feat-proj-123`. |
+| `worktree_branch_prefix` | string | `""` | Prefix prepended to worktree branch names. E.g. with `"myproject-"`, branch becomes `myproject-feat/proj-123`. |
 | `worktree_copy` | string array | `[]` | Files or glob patterns to copy from the project root into new worktrees (e.g. `[".env", ".vscode/**"]`). |
 | `worktree_commands` | string array | `[]` | Shell commands to run inside the new worktree directory after creation, in order (e.g. `["npm install"]`). |
 
@@ -119,14 +125,16 @@ Lazyjira reads an optional `.lazyjira` file (TOML) from the working directory. P
 
 ```toml
 worktree_dir = ".."
-worktree_prefix = "myproject-"
+worktree_folder_prefix = "myproject-"
+worktree_branch_prefix = "myproject-"
 worktree_copy = [".env", ".vscode/**"]
 worktree_commands = ["npm install"]
 ```
 
-When you press `s` on a "To Do" ticket, lazyjira will:
+When you press `s` on a "To Do" ticket (e.g. `NERO-1234`), lazyjira will:
 
-1. Assign the ticket to you and transition it to **In Progress**
-2. Create a git worktree at `<worktree_dir>/<TICKET-KEY>` with branch `feat/<worktree_prefix><TICKET-KEY>` (or `fix/` for bugs)
-3. Copy files matching `worktree_copy` patterns into the worktree
-4. Run each `worktree_commands` entry inside the new worktree
+1. Prompt you to choose a conventional commit type (`feat`, `fix`, `refactor`, etc.) — bugs default to `fix` automatically
+2. Assign the ticket to you and transition it to **In Progress**
+3. Create a git worktree with folder `<worktree_folder_prefix><type>-nero-1234` and branch `<worktree_branch_prefix><type>/nero-1234`
+4. Copy files matching `worktree_copy` patterns into the worktree
+5. Run each `worktree_commands` entry inside the new worktree

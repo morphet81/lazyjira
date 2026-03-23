@@ -144,9 +144,23 @@ struct TicketsReceiver {
     prev_ticket: usize,
 }
 
+/// Conventional commit types, ordered from most to least commonly used.
+pub const COMMIT_TYPES: &[&str] = &[
+    "feat", "fix", "refactor", "chore", "docs", "style", "test", "perf", "ci", "build", "revert",
+];
+
 pub struct StartPopup {
     pub ticket_key: String,
-    pub result: Option<Result<String, String>>,
+    pub phase: StartPopupPhase,
+}
+
+pub enum StartPopupPhase {
+    /// User is choosing a conventional commit type.
+    ChoosingType { selected: usize },
+    /// Worktree creation is in progress.
+    Creating { commit_type: String },
+    /// Done — success or error.
+    Done(Result<String, String>),
 }
 
 impl App {
@@ -575,36 +589,68 @@ impl App {
         self.current_ticket().is_some()
     }
 
-    /// Opens the start-ticket popup (in-progress state). Call this, draw, then call run_start_ticket.
+    /// Opens the start-ticket popup. For bugs, skips type selection.
     pub fn open_start_popup(&mut self) {
         let ticket = match self.current_ticket() {
             Some(t) => t.clone(),
             None => return,
         };
+        let is_bug = ticket
+            .fields
+            .issuetype
+            .as_ref()
+            .map(|t| t.name.eq_ignore_ascii_case("bug"))
+            .unwrap_or(false);
+
+        let phase = if is_bug {
+            StartPopupPhase::Creating { commit_type: "fix".to_string() }
+        } else {
+            StartPopupPhase::ChoosingType { selected: 0 }
+        };
+
         self.start_popup = Some(StartPopup {
             ticket_key: ticket.key.clone(),
-            result: None,
+            phase,
         });
     }
 
-    /// Spawns the start-ticket work in a background thread.
+    pub fn start_popup_up(&mut self) {
+        if let Some(StartPopup { phase: StartPopupPhase::ChoosingType { selected }, .. }) = &mut self.start_popup {
+            if *selected > 0 {
+                *selected -= 1;
+            }
+        }
+    }
+
+    pub fn start_popup_down(&mut self) {
+        if let Some(StartPopup { phase: StartPopupPhase::ChoosingType { selected }, .. }) = &mut self.start_popup {
+            if *selected + 1 < COMMIT_TYPES.len() {
+                *selected += 1;
+            }
+        }
+    }
+
+    /// User confirmed the commit type. Transition to Creating phase.
+    pub fn start_popup_confirm(&mut self) {
+        if let Some(popup) = &mut self.start_popup {
+            if let StartPopupPhase::ChoosingType { selected } = &popup.phase {
+                let commit_type = COMMIT_TYPES[*selected].to_string();
+                popup.phase = StartPopupPhase::Creating { commit_type };
+            }
+        }
+    }
+
+    /// Spawns the start-ticket work in a background thread. Only runs when in Creating phase.
     pub fn run_start_ticket(&mut self) {
         let popup = match self.start_popup.as_ref() {
             Some(p) => p,
             None => return,
         };
-        let key = popup.ticket_key.clone();
-
-        let ticket = match self.current_ticket() {
-            Some(t) => t.clone(),
-            None => return,
+        let commit_type = match &popup.phase {
+            StartPopupPhase::Creating { commit_type } => commit_type.clone(),
+            _ => return,
         };
-        let issue_type = ticket
-            .fields
-            .issuetype
-            .as_ref()
-            .map(|t| t.name.clone())
-            .unwrap_or_else(|| "Task".to_string());
+        let key = popup.ticket_key.clone();
         let config = self.config.clone();
 
         let (tx, rx) = mpsc::channel();
@@ -613,7 +659,7 @@ impl App {
             let result = (|| {
                 jira::start_workitem(&key)
                     .map_err(|e| format!("Failed to start ticket: {}", e))?;
-                crate::worktree::create_worktree(&key, &issue_type, &config)
+                crate::worktree::create_worktree(&key, &commit_type, &config)
                     .map_err(|e| format!("Ticket started but worktree failed: {}", e))
             })();
             let _ = tx.send(result);
@@ -631,14 +677,14 @@ impl App {
                     if result.is_ok() {
                         self.detail_cache.remove(&popup.ticket_key);
                     }
-                    popup.result = Some(result);
+                    popup.phase = StartPopupPhase::Done(result);
                 }
                 self.start_receiver = None;
             }
             Err(mpsc::TryRecvError::Empty) => {}
             Err(mpsc::TryRecvError::Disconnected) => {
                 if let Some(popup) = self.start_popup.as_mut() {
-                    popup.result = Some(Err("Background task disconnected".to_string()));
+                    popup.phase = StartPopupPhase::Done(Err("Background task disconnected".to_string()));
                 }
                 self.start_receiver = None;
             }
