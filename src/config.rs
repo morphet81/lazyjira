@@ -30,6 +30,14 @@ pub struct LazyJiraConfig {
     /// Prompt for a conventional commit type when starting a ticket (default: false).
     #[serde(default)]
     pub conventional_commits_worktree_prefix: bool,
+
+    /// Automatically open a Zellij tab for the new worktree (default: true).
+    #[serde(default = "default_true")]
+    pub zellij_tab: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_worktree_dir() -> String {
@@ -61,6 +69,10 @@ const EXAMPLE_CONFIG: &str = r#"# lazyjira configuration
 # starting a ticket. When false, uses "feat" for all non-bug tickets and
 # "fix" for bugs (default: false).
 # conventional_commits_worktree_prefix = false
+
+# Automatically open a Zellij tab for the new worktree when running
+# inside Zellij (default: true).
+# zellij_tab = true
 "#;
 
 impl LazyJiraConfig {

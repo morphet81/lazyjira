@@ -84,7 +84,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                             if was_ok {
                                 app.refresh_workitems();
                                 // Open Zellij tab if running inside Zellij
-                                if let (Some(path), true) = (worktree_path, std::env::var("ZELLIJ").is_ok()) {
+                                if let (Some(path), true) = (worktree_path, app.config.zellij_tab && std::env::var("ZELLIJ").is_ok()) {
                                     worktree::open_zellij_tab(&ticket_key, &path);
                                 }
                             }

@@ -121,6 +121,7 @@ Lazyjira reads an optional `.lazyjira` file (TOML) from the working directory. P
 | `worktree_copy` | string array | `[]` | Files or glob patterns to copy from the project root into new worktrees (e.g. `[".env", ".vscode/**"]`). |
 | `worktree_commands` | string array | `[]` | Shell commands to run inside the new worktree directory after creation, in order (e.g. `["npm install"]`). |
 | `conventional_commits_worktree_prefix` | bool | `false` | Prompt for a conventional commit type (`feat`, `fix`, `refactor`, ...) when starting a ticket. When `false`, uses `feat` for non-bugs and `fix` for bugs. |
+| `zellij_tab` | bool | `true` | Automatically open a Zellij tab for the new worktree when running inside Zellij. |
 
 ### Example
 
