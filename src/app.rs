@@ -129,6 +129,13 @@ pub struct App {
     // Config
     #[allow(dead_code)]
     pub config: LazyJiraConfig,
+    // Start-ticket popup
+    pub start_popup: Option<StartPopup>,
+}
+
+pub struct StartPopup {
+    pub ticket_key: String,
+    pub result: Option<Result<String, String>>,
 }
 
 impl App {
@@ -164,6 +171,7 @@ impl App {
             detail_queue: VecDeque::new(),
             detail_cache: HashMap::new(),
             config: LazyJiraConfig::load(),
+            start_popup: None,
         }
     }
 
@@ -486,12 +494,30 @@ impl App {
         self.current_ticket().is_some()
     }
 
-    pub fn perform_start_ticket(&mut self) {
+    /// Opens the start-ticket popup (in-progress state). Call this, draw, then call run_start_ticket.
+    pub fn open_start_popup(&mut self) {
         let ticket = match self.current_ticket() {
             Some(t) => t.clone(),
             None => return,
         };
-        let key = &ticket.key;
+        self.start_popup = Some(StartPopup {
+            ticket_key: ticket.key.clone(),
+            result: None,
+        });
+    }
+
+    /// Actually performs the start-ticket work (blocking). Updates the popup with the result.
+    pub fn run_start_ticket(&mut self) {
+        let popup = match self.start_popup.as_ref() {
+            Some(p) => p,
+            None => return,
+        };
+        let key = popup.ticket_key.clone();
+
+        let ticket = match self.current_ticket() {
+            Some(t) => t.clone(),
+            None => return,
+        };
         let issue_type = ticket
             .fields
             .issuetype
@@ -500,28 +526,29 @@ impl App {
             .unwrap_or("Task");
 
         // Step 1: Assign + transition
-        self.status_message = format!("Assigning {}...", key);
-        match jira::start_workitem(key) {
-            Ok(()) => {}
-            Err(e) => {
-                self.status_message = format!("Error starting {}: {}", key, e);
-                return;
-            }
+        if let Err(e) = jira::start_workitem(&key) {
+            self.start_popup.as_mut().unwrap().result =
+                Some(Err(format!("Failed to start ticket: {}", e)));
+            return;
         }
 
-        // Step 2: Create worktree + copy files + run commands
-        self.status_message = format!("Creating worktree for {}...", key);
-        match crate::worktree::create_worktree(key, issue_type, &self.config) {
+        // Step 2: Create worktree
+        match crate::worktree::create_worktree(&key, issue_type, &self.config) {
             Ok(path) => {
-                self.status_message = format!("{} started — worktree at {}", key, path);
+                self.start_popup.as_mut().unwrap().result = Some(Ok(path));
             }
             Err(e) => {
-                self.status_message = format!("{} started but worktree failed: {}", key, e);
+                self.start_popup.as_mut().unwrap().result =
+                    Some(Err(format!("Ticket started but worktree failed: {}", e)));
             }
         }
 
-        // Invalidate cache for this ticket
-        self.detail_cache.remove(key);
+        // Invalidate cache
+        self.detail_cache.remove(&key);
+    }
+
+    pub fn close_start_popup(&mut self) {
+        self.start_popup = None;
     }
 
     fn populate_editable_fields(&mut self, detail: &WorkItemDetail) {

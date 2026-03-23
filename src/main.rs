@@ -59,7 +59,20 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                     continue;
                 }
 
-                if app.show_epic_popup {
+                if app.start_popup.is_some() {
+                    // Start-ticket popup: if result is set, any key dismisses
+                    if app.start_popup.as_ref().unwrap().result.is_some() {
+                        let was_ok = app.start_popup.as_ref().unwrap().result.as_ref().unwrap().is_ok();
+                        app.close_start_popup();
+                        if was_ok {
+                            // Refresh tickets to reflect status change
+                            app.loading_tickets = true;
+                            terminal.draw(|f| ui::draw(f, &app))?;
+                            app.refresh_workitems();
+                            app.loading_tickets = false;
+                        }
+                    }
+                } else if app.show_epic_popup {
                     match key.code {
                         KeyCode::Up => app.epic_popup_up(),
                         KeyCode::Down => app.epic_popup_down(),
@@ -195,14 +208,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         }
                         KeyCode::Char('s') => {
                             if app.start_current_ticket() {
-                                app.status_message = "Starting ticket...".to_string();
+                                app.open_start_popup();
                                 terminal.draw(|f| ui::draw(f, &app))?;
-                                app.perform_start_ticket();
-                                // Refresh to reflect status change
-                                app.loading_tickets = true;
-                                terminal.draw(|f| ui::draw(f, &app))?;
-                                app.refresh_workitems();
-                                app.loading_tickets = false;
+                                app.run_start_ticket();
                             }
                         }
                         _ => {}
