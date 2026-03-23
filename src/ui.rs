@@ -557,16 +557,16 @@ fn draw_start_popup(frame: &mut Frame, popup: &StartPopup, area: Rect) {
             state.select(Some(*selected));
             frame.render_stateful_widget(list, popup_area, &mut state);
         }
-        StartPopupPhase::Creating { .. } => {
+        StartPopupPhase::Creating { progress } => {
             draw_start_message(
                 frame,
                 area,
-                " Starting ticket ",
-                &format!("Creating worktree for {}...", popup.ticket_key),
+                &format!(" Starting {} ", popup.ticket_key),
+                progress,
                 Color::Yellow,
             );
         }
-        StartPopupPhase::Done(Ok(path)) => {
+        StartPopupPhase::Done { result: Ok(path) } => {
             draw_start_message(
                 frame,
                 area,
@@ -575,7 +575,7 @@ fn draw_start_popup(frame: &mut Frame, popup: &StartPopup, area: Rect) {
                 Color::Green,
             );
         }
-        StartPopupPhase::Done(Err(e)) => {
+        StartPopupPhase::Done { result: Err(e) } => {
             draw_start_message(
                 frame,
                 area,

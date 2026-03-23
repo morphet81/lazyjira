@@ -71,15 +71,22 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         app::StartPopupPhase::Creating { .. } => {
                             // In progress — ignore keys
                         }
-                        app::StartPopupPhase::Done(_) => {
-                            // Any key dismisses
-                            let was_ok = matches!(
-                                &app.start_popup.as_ref().unwrap().phase,
-                                app::StartPopupPhase::Done(Ok(_))
-                            );
+                        app::StartPopupPhase::Done { .. } => {
+                            // Any key dismisses — extract info before closing
+                            let (was_ok, ticket_key, worktree_path) = match &app.start_popup.as_ref().unwrap().phase {
+                                app::StartPopupPhase::Done { result: Ok(path) } => {
+                                    let key = app.start_popup.as_ref().unwrap().ticket_key.clone();
+                                    (true, key, Some(path.clone()))
+                                }
+                                _ => (false, String::new(), None),
+                            };
                             app.close_start_popup();
                             if was_ok {
                                 app.refresh_workitems();
+                                // Open Zellij tab if running inside Zellij
+                                if let (Some(path), true) = (worktree_path, std::env::var("ZELLIJ").is_ok()) {
+                                    worktree::open_zellij_tab(&ticket_key, &path);
+                                }
                             }
                         }
                     }

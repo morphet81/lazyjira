@@ -129,7 +129,7 @@ pub struct App {
     // Background project/ticket loading
     projects_receiver: Option<mpsc::Receiver<anyhow::Result<Vec<JiraProject>>>>,
     tickets_receiver: Option<TicketsReceiver>,
-    start_receiver: Option<mpsc::Receiver<Result<String, String>>>,
+    start_receiver: Option<mpsc::Receiver<crate::worktree::WorktreeProgress>>,
     // Config
     #[allow(dead_code)]
     pub config: LazyJiraConfig,
@@ -151,6 +151,7 @@ pub const COMMIT_TYPES: &[&str] = &[
 
 pub struct StartPopup {
     pub ticket_key: String,
+    pub commit_type: String,
     pub phase: StartPopupPhase,
 }
 
@@ -158,9 +159,9 @@ pub enum StartPopupPhase {
     /// User is choosing a conventional commit type.
     ChoosingType { selected: usize },
     /// Worktree creation is in progress.
-    Creating { commit_type: String },
-    /// Done — success or error.
-    Done(Result<String, String>),
+    Creating { progress: String },
+    /// Done — success or error. Path is stored for Zellij tab creation.
+    Done { result: Result<String, String> },
 }
 
 impl App {
@@ -603,16 +604,17 @@ impl App {
             .map(|t| t.name.eq_ignore_ascii_case("bug"))
             .unwrap_or(false);
 
-        let phase = if is_bug {
-            StartPopupPhase::Creating { commit_type: "fix".to_string() }
+        let (phase, commit_type) = if is_bug {
+            (StartPopupPhase::Creating { progress: "Starting...".to_string() }, "fix".to_string())
         } else if self.config.conventional_commits_worktree_prefix {
-            StartPopupPhase::ChoosingType { selected: 0 }
+            (StartPopupPhase::ChoosingType { selected: 0 }, String::new())
         } else {
-            StartPopupPhase::Creating { commit_type: "feat".to_string() }
+            (StartPopupPhase::Creating { progress: "Starting...".to_string() }, "feat".to_string())
         };
 
         self.start_popup = Some(StartPopup {
             ticket_key: ticket.key.clone(),
+            commit_type,
             phase,
         });
     }
@@ -637,8 +639,8 @@ impl App {
     pub fn start_popup_confirm(&mut self) {
         if let Some(popup) = &mut self.start_popup {
             if let StartPopupPhase::ChoosingType { selected } = &popup.phase {
-                let commit_type = COMMIT_TYPES[*selected].to_string();
-                popup.phase = StartPopupPhase::Creating { commit_type };
+                popup.commit_type = COMMIT_TYPES[*selected].to_string();
+                popup.phase = StartPopupPhase::Creating { progress: "Starting...".to_string() };
             }
         }
     }
@@ -649,23 +651,23 @@ impl App {
             Some(p) => p,
             None => return,
         };
-        let commit_type = match &popup.phase {
-            StartPopupPhase::Creating { commit_type } => commit_type.clone(),
-            _ => return,
-        };
+        if !matches!(popup.phase, StartPopupPhase::Creating { .. }) {
+            return;
+        }
         let key = popup.ticket_key.clone();
+        let commit_type = popup.commit_type.clone();
         let config = self.config.clone();
 
         let (tx, rx) = mpsc::channel();
         self.start_receiver = Some(rx);
         thread::spawn(move || {
-            let result = (|| {
-                jira::start_workitem(&key)
-                    .map_err(|e| format!("Failed to start ticket: {}", e))?;
-                crate::worktree::create_worktree(&key, &commit_type, &config)
-                    .map_err(|e| format!("Ticket started but worktree failed: {}", e))
-            })();
-            let _ = tx.send(result);
+            use crate::worktree::WorktreeProgress;
+            let _ = tx.send(WorktreeProgress::Step("Assigning ticket...".into()));
+            if let Err(e) = jira::start_workitem(&key) {
+                let _ = tx.send(WorktreeProgress::Done(Err(format!("Failed to start ticket: {}", e))));
+                return;
+            }
+            crate::worktree::create_worktree(&key, &commit_type, &config, &tx);
         });
     }
 
@@ -674,22 +676,34 @@ impl App {
             Some(rx) => rx,
             None => return,
         };
-        match rx.try_recv() {
-            Ok(result) => {
-                if let Some(popup) = self.start_popup.as_mut() {
-                    if result.is_ok() {
-                        self.detail_cache.remove(&popup.ticket_key);
+        // Drain all available messages to stay up to date
+        loop {
+            match rx.try_recv() {
+                Ok(crate::worktree::WorktreeProgress::Step(msg)) => {
+                    if let Some(popup) = self.start_popup.as_mut() {
+                        popup.phase = StartPopupPhase::Creating { progress: msg };
                     }
-                    popup.phase = StartPopupPhase::Done(result);
                 }
-                self.start_receiver = None;
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
-                if let Some(popup) = self.start_popup.as_mut() {
-                    popup.phase = StartPopupPhase::Done(Err("Background task disconnected".to_string()));
+                Ok(crate::worktree::WorktreeProgress::Done(result)) => {
+                    if let Some(popup) = self.start_popup.as_mut() {
+                        if result.is_ok() {
+                            self.detail_cache.remove(&popup.ticket_key);
+                        }
+                        popup.phase = StartPopupPhase::Done { result };
+                    }
+                    self.start_receiver = None;
+                    return;
                 }
-                self.start_receiver = None;
+                Err(mpsc::TryRecvError::Empty) => return,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    if let Some(popup) = self.start_popup.as_mut() {
+                        popup.phase = StartPopupPhase::Done {
+                            result: Err("Background task disconnected".to_string()),
+                        };
+                    }
+                    self.start_receiver = None;
+                    return;
+                }
             }
         }
     }

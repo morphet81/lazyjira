@@ -137,6 +137,10 @@ When you press `s` on a "To Do" ticket (e.g. `NERO-1234`), lazyjira will:
 
 1. If `conventional_commits_worktree_prefix` is enabled, prompt you to choose a type (`feat`, `fix`, `refactor`, etc.) — bugs always default to `fix`
 2. Assign the ticket to you and transition it to **In Progress**
-3. Create a git worktree with folder `<worktree_folder_prefix><type>-nero-1234` and branch `<worktree_branch_prefix><type>/nero-1234`
-4. Copy files matching `worktree_copy` patterns into the worktree
-5. Run each `worktree_commands` entry inside the new worktree
+3. Run `git fetch` to ensure branches are up to date
+4. Create a git worktree with folder `<worktree_folder_prefix><type>-nero-1234` and branch `<worktree_branch_prefix><type>/nero-1234`
+5. Copy files matching `worktree_copy` patterns into the worktree
+6. Run each `worktree_commands` entry inside the new worktree
+7. If running inside **Zellij**, open a new tab named after the ticket key with the worktree as working directory
+
+A progress popup shows each step as it executes, including the name of any custom commands being run.
