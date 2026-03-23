@@ -132,6 +132,7 @@ worktree_branch_prefix = "myproject-"
 worktree_copy = [".env", ".vscode/**"]
 worktree_commands = ["npm install"]
 conventional_commits_worktree_prefix = true
+zellij_tab = true
 ```
 
 When you press `s` on a "To Do" ticket (e.g. `NERO-1234`), lazyjira will:
