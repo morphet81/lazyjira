@@ -1,7 +1,26 @@
 use crate::adf;
 use crate::jira::{self, JiraProject, WorkItem, WorkItemDetail};
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
+
+/// Compare Jira issue keys naturally: "NERO-2" < "NERO-10".
+fn cmp_issue_key(a: &str, b: &str) -> Ordering {
+    let (a_prefix, a_num) = split_key(a);
+    let (b_prefix, b_num) = split_key(b);
+    a_prefix.cmp(&b_prefix).then(a_num.cmp(&b_num))
+}
+
+fn split_key(key: &str) -> (&str, u64) {
+    match key.rfind('-') {
+        Some(pos) => {
+            let prefix = &key[..pos];
+            let num = key[pos + 1..].parse::<u64>().unwrap_or(0);
+            (prefix, num)
+        }
+        None => (key, 0),
+    }
+}
 
 pub const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 
@@ -27,11 +46,30 @@ pub enum SaveStatus {
     Error(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TicketSort {
+    Priority, // board rank order
+    KeyAsc,
+    KeyDesc,
+}
+
+impl TicketSort {
+    pub fn label(&self) -> &'static str {
+        match self {
+            TicketSort::Priority => "priority",
+            TicketSort::KeyAsc => "key ↑",
+            TicketSort::KeyDesc => "key ↓",
+        }
+    }
+}
+
 /// A board column derived from status categories.
 #[derive(Debug, Clone)]
 pub struct Column {
     pub name: String,
     pub items: Vec<WorkItem>,
+    /// Items in original board rank order (for restoring priority sort).
+    pub ranked_items: Vec<WorkItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,7 +91,9 @@ pub struct App {
     pub active_pane: Pane,
     pub status_message: String,
     pub should_quit: bool,
+    pub loading_projects: bool,
     pub loading_tickets: bool,
+    pub ticket_sort: TicketSort,
     pub loading_detail: bool,
     // Detail editing state
     pub detail_mode: DetailMode,
@@ -78,7 +118,9 @@ impl App {
             active_pane: Pane::Projects,
             status_message: String::new(),
             should_quit: false,
+            loading_projects: false,
             loading_tickets: false,
+            ticket_sort: TicketSort::Priority,
             loading_detail: false,
             detail_mode: DetailMode::Viewing,
             detail_field_index: 0,
@@ -92,12 +134,11 @@ impl App {
     }
 
     pub fn load_projects(&mut self) {
-        self.status_message = "Loading projects...".to_string();
+        self.loading_projects = false;
         match jira::fetch_projects() {
             Ok(projects) => {
                 self.projects = projects;
                 self.project_index = 0;
-                self.status_message = format!("{} projects loaded", self.projects.len());
             }
             Err(e) => {
                 self.status_message = format!("Error: {}", e);
@@ -120,6 +161,7 @@ impl App {
                 self.detail = None;
                 self.editable_fields.clear();
                 self.detail_mode = DetailMode::Viewing;
+                self.active_pane = Pane::Tickets;
                 self.last_tickets_refresh = Some(Instant::now());
                 self.status_message = format!(
                     "{} tickets in {} columns",
@@ -176,6 +218,15 @@ impl App {
         let mut groups: BTreeMap<u32, (String, Vec<WorkItem>)> = BTreeMap::new();
 
         for item in items {
+            let is_epic = item
+                .fields
+                .issuetype
+                .as_ref()
+                .map(|t| t.name.eq_ignore_ascii_case("epic"))
+                .unwrap_or(false);
+            if is_epic {
+                continue;
+            }
             let cat_id = item.fields.status.status_category.id;
             let cat_name = item.fields.status.status_category.name.clone();
             groups
@@ -201,9 +252,36 @@ impl App {
             .into_iter()
             .map(|id| {
                 let (name, items) = groups.remove(&id).unwrap();
-                Column { name, items }
+                Column {
+                    name,
+                    ranked_items: items.clone(),
+                    items,
+                }
             })
             .collect();
+        self.apply_sort();
+    }
+
+    pub fn set_ticket_sort(&mut self, sort: TicketSort) {
+        self.ticket_sort = sort;
+        self.apply_sort();
+        self.ticket_index = 0;
+    }
+
+    fn apply_sort(&mut self) {
+        for column in &mut self.columns {
+            match self.ticket_sort {
+                TicketSort::Priority => {
+                    column.items = column.ranked_items.clone();
+                }
+                TicketSort::KeyAsc => {
+                    column.items.sort_by(|a, b| cmp_issue_key(&a.key, &b.key));
+                }
+                TicketSort::KeyDesc => {
+                    column.items.sort_by(|a, b| cmp_issue_key(&b.key, &a.key));
+                }
+            }
+        }
     }
 
     pub fn load_detail(&mut self) {

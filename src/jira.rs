@@ -96,7 +96,7 @@ pub fn fetch_projects() -> Result<Vec<JiraProject>> {
 }
 
 pub fn fetch_workitems(project_key: &str) -> Result<Vec<WorkItem>> {
-    let jql = format!("project = {}", project_key);
+    let jql = format!("project = {} ORDER BY rank", project_key);
     let json = run_acli(&[
         "jira",
         "workitem",

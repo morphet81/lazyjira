@@ -7,7 +7,7 @@ use std::io;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -35,7 +35,17 @@ fn main() -> Result<()> {
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     let mut app = App::new();
+    app.loading_projects = true;
+    terminal.draw(|f| ui::draw(f, &app))?;
     app.load_projects();
+
+    // Show projects, then load first project's tickets
+    if !app.projects.is_empty() {
+        app.loading_tickets = true;
+        terminal.draw(|f| ui::draw(f, &app))?;
+        app.load_workitems();
+        app.loading_tickets = false;
+    }
 
     loop {
         terminal.draw(|f| ui::draw(f, &app))?;
@@ -109,9 +119,19 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         app.pending_d = false;
                     }
                 } else {
+                    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
                     match key.code {
                         KeyCode::Char('q') => {
                             app.should_quit = true;
+                        }
+                        KeyCode::Up if shift => {
+                            app.set_ticket_sort(app::TicketSort::KeyAsc);
+                        }
+                        KeyCode::Down if shift => {
+                            app.set_ticket_sort(app::TicketSort::KeyDesc);
+                        }
+                        KeyCode::Char('P') => {
+                            app.set_ticket_sort(app::TicketSort::Priority);
                         }
                         KeyCode::Up => app.move_up(),
                         KeyCode::Down => app.move_down(),

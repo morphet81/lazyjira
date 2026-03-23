@@ -37,6 +37,19 @@ fn focused_border_style(app: &App, pane: Pane) -> Style {
 }
 
 fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .title(" [1] Projects ")
+        .borders(Borders::ALL)
+        .border_style(focused_border_style(app, Pane::Projects));
+
+    if app.loading_projects {
+        let loading = Paragraph::new("Loading projects...")
+            .block(block)
+            .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(loading, area);
+        return;
+    }
+
     let items: Vec<ListItem> = app
         .projects
         .iter()
@@ -53,11 +66,6 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
             ]))
         })
         .collect();
-
-    let block = Block::default()
-        .title(" [1] Projects ")
-        .borders(Borders::ALL)
-        .border_style(focused_border_style(app, Pane::Projects));
 
     let list = List::new(items)
         .block(block)
@@ -80,10 +88,11 @@ fn draw_tickets(frame: &mut Frame, app: &App, area: Rect) {
         " [2] Tickets ".to_string()
     } else {
         format!(
-            " [2] ◀ {} ▶  ({}/{}) ",
+            " [2] ◀ {} ▶  ({}/{}) [{}] ",
             app.current_column_name(),
             app.column_index + 1,
-            app.columns.len()
+            app.columns.len(),
+            app.ticket_sort.label()
         )
     };
 
@@ -119,7 +128,7 @@ fn draw_tickets(frame: &mut Frame, app: &App, area: Rect) {
 
     // Hint bar
     if app.active_pane == Pane::Tickets {
-        let hint = Paragraph::new(" ◀▶ columns | ↑↓ select | Enter detail | r refresh")
+        let hint = Paragraph::new(" ◀▶ columns | ↑↓ select | S-↑↓ sort key | P priority | r refresh")
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(hint, hint_area);
     }
