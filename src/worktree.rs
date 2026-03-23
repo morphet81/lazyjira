@@ -95,7 +95,7 @@ fn run_git(args: &[&str]) -> Result<(), String> {
 /// Uses a tab layout file so the pane cwd is set correctly.
 pub fn open_zellij_tab(name: &str, cwd: &str) {
     let escaped_cwd = cwd.replace('\\', "\\\\").replace('"', "\\\"");
-    let layout = format!("pane cwd=\"{}\"", escaped_cwd);
+    let layout = format!("layout {{\n    pane cwd=\"{}\"\n}}\n", escaped_cwd);
     if let Ok(tmp) = tempfile::Builder::new().suffix(".kdl").tempfile() {
         let path = tmp.path().to_path_buf();
         if std::fs::write(&path, &layout).is_ok() {
