@@ -92,22 +92,10 @@ fn run_git(args: &[&str]) -> Result<(), String> {
 }
 
 /// Open a new Zellij tab with the given name and working directory.
-/// Uses a tab layout file so the pane cwd is set correctly.
 pub fn open_zellij_tab(name: &str, cwd: &str) {
-    let escaped_cwd = cwd.replace('\\', "\\\\").replace('"', "\\\"");
-    let layout = format!("layout {{\n    pane cwd=\"{}\"\n}}\n", escaped_cwd);
-    if let Ok(tmp) = tempfile::Builder::new().suffix(".kdl").tempfile() {
-        let path = tmp.path().to_path_buf();
-        if std::fs::write(&path, &layout).is_ok() {
-            let _ = Command::new("zellij")
-                .args([
-                    "action", "new-tab",
-                    "--layout", &path.to_string_lossy(),
-                    "--name", name,
-                ])
-                .output();
-        }
-    }
+    let _ = Command::new("zellij")
+        .args(["action", "new-tab", "--name", name, "--cwd", cwd])
+        .output();
 }
 
 fn copy_glob_matches(cwd: &Path, pattern: &str, dest: &Path) -> Result<()> {
