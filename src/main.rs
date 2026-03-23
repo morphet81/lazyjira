@@ -179,6 +179,20 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                                 app.loading_tickets = false;
                             }
                         }
+                        KeyCode::Char('C') => {
+                            match config::LazyJiraConfig::create_default() {
+                                Ok(true) => {
+                                    app.config = config::LazyJiraConfig::load();
+                                    app.status_message = "Created .lazyjira config file".to_string();
+                                }
+                                Ok(false) => {
+                                    app.status_message = ".lazyjira config already exists".to_string();
+                                }
+                                Err(e) => {
+                                    app.status_message = format!("Error creating config: {}", e);
+                                }
+                            }
+                        }
                         KeyCode::Char('s') => {
                             if app.start_current_ticket() {
                                 app.status_message = "Starting ticket...".to_string();
