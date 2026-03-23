@@ -26,6 +26,10 @@ pub struct LazyJiraConfig {
     /// Commands to run in the new worktree directory after creation (in order).
     #[serde(default)]
     pub worktree_commands: Vec<String>,
+
+    /// Prompt for a conventional commit type when starting a ticket (default: false).
+    #[serde(default)]
+    pub conventional_commits: bool,
 }
 
 fn default_worktree_dir() -> String {
@@ -52,6 +56,11 @@ const EXAMPLE_CONFIG: &str = r#"# lazyjira configuration
 # Commands to run inside the new worktree directory after creation (in order).
 # Example: install dependencies.
 # worktree_commands = ["npm install"]
+
+# Prompt for a conventional commit type (feat, fix, refactor, ...) when
+# starting a ticket. When false, uses "feat" for all non-bug tickets and
+# "fix" for bugs (default: false).
+# conventional_commits = false
 "#;
 
 impl LazyJiraConfig {

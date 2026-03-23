@@ -589,7 +589,8 @@ impl App {
         self.current_ticket().is_some()
     }
 
-    /// Opens the start-ticket popup. For bugs, skips type selection.
+    /// Opens the start-ticket popup. For bugs, always uses "fix".
+    /// For other types, shows type picker only if conventional_commits is enabled.
     pub fn open_start_popup(&mut self) {
         let ticket = match self.current_ticket() {
             Some(t) => t.clone(),
@@ -604,8 +605,10 @@ impl App {
 
         let phase = if is_bug {
             StartPopupPhase::Creating { commit_type: "fix".to_string() }
-        } else {
+        } else if self.config.conventional_commits {
             StartPopupPhase::ChoosingType { selected: 0 }
+        } else {
+            StartPopupPhase::Creating { commit_type: "feat".to_string() }
         };
 
         self.start_popup = Some(StartPopup {
