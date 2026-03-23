@@ -177,6 +177,18 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                                 app.loading_tickets = false;
                             }
                         }
+                        KeyCode::Char('s') => {
+                            if app.start_current_ticket() {
+                                app.status_message = "Starting ticket...".to_string();
+                                terminal.draw(|f| ui::draw(f, &app))?;
+                                app.perform_start_ticket();
+                                // Refresh to reflect status change
+                                app.loading_tickets = true;
+                                terminal.draw(|f| ui::draw(f, &app))?;
+                                app.refresh_workitems();
+                                app.loading_tickets = false;
+                            }
+                        }
                         _ => {}
                     }
                 }

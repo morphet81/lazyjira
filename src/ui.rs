@@ -137,7 +137,7 @@ fn draw_tickets(frame: &mut Frame, app: &App, area: Rect) {
 
     // Hint bar
     if app.active_pane == Pane::Tickets {
-        let hint = Paragraph::new(" ◀▶ columns | ↑↓ select | e epics | S-↑↓ sort | P priority | r refresh")
+        let hint = Paragraph::new(" ◀▶ columns | ↑↓ select | e epics | s start | S-↑↓ sort | P priority | r refresh")
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(hint, hint_area);
     }

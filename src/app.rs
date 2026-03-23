@@ -469,6 +469,35 @@ impl App {
         }
     }
 
+    /// Assign to current user and transition to In Progress. Returns true if action was initiated.
+    /// Only works from the "To Do" column.
+    pub fn start_current_ticket(&mut self) -> bool {
+        if self.active_pane != Pane::Tickets || self.columns.is_empty() {
+            return false;
+        }
+        if self.current_column_name() != "To Do" {
+            return false;
+        }
+        self.current_ticket().is_some()
+    }
+
+    pub fn perform_start_ticket(&mut self) {
+        let key = match self.current_ticket() {
+            Some(t) => t.key.clone(),
+            None => return,
+        };
+        match jira::start_workitem(&key) {
+            Ok(()) => {
+                self.status_message = format!("{} started", key);
+                // Invalidate cache for this ticket
+                self.detail_cache.remove(&key);
+            }
+            Err(e) => {
+                self.status_message = format!("Error starting {}: {}", key, e);
+            }
+        }
+    }
+
     fn populate_editable_fields(&mut self, detail: &WorkItemDetail) {
         let summary = detail.fields.summary.clone();
         let description = detail
