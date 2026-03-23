@@ -183,7 +183,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
             }
         }
 
-        // Poll background epic fetch
+        // Poll background fetches
+        app.poll_details();
         app.poll_epics();
 
         // Auto-refresh every 5 minutes

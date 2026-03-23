@@ -1,9 +1,19 @@
 use crate::adf;
 use crate::jira::{self, JiraProject, WorkItem, WorkItemDetail};
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
+
+const MAX_DETAIL_FETCHES: usize = 5;
+
+struct DetailFetch {
+    key: String,
+    receiver: mpsc::Receiver<anyhow::Result<WorkItemDetail>>,
+    #[allow(dead_code)]
+    handle: thread::JoinHandle<()>,
+}
 
 /// Compare Jira issue keys naturally: "NERO-2" < "NERO-10".
 fn cmp_issue_key(a: &str, b: &str) -> Ordering {
@@ -112,6 +122,9 @@ pub struct App {
     pub selected_epic: Option<String>,
     pub loading_epics: bool,
     epics_receiver: Option<mpsc::Receiver<anyhow::Result<Vec<WorkItem>>>>,
+    // Background detail fetching
+    detail_queue: VecDeque<DetailFetch>,
+    detail_cache: HashMap<String, WorkItemDetail>,
 }
 
 impl App {
@@ -144,6 +157,8 @@ impl App {
             selected_epic: None,
             loading_epics: false,
             epics_receiver: None,
+            detail_queue: VecDeque::new(),
+            detail_cache: HashMap::new(),
         }
     }
 
@@ -175,6 +190,9 @@ impl App {
                 self.detail = None;
                 self.editable_fields.clear();
                 self.detail_mode = DetailMode::Viewing;
+                self.detail_cache.clear();
+                self.detail_queue.clear();
+                self.loading_detail = false;
                 self.active_pane = Pane::Tickets;
                 self.last_tickets_refresh = Some(Instant::now());
                 self.status_message = format!(
@@ -186,6 +204,8 @@ impl App {
                 if self.epics.is_empty() && !self.loading_epics {
                     self.start_epic_fetch(project_key);
                 }
+                // Auto-fetch detail for first ticket
+                self.request_current_detail();
             }
             Err(e) => {
                 self.columns.clear();
@@ -341,20 +361,111 @@ impl App {
     pub fn load_detail(&mut self) {
         if let Some(item) = self.current_ticket() {
             let key = item.key.clone();
-            self.status_message = format!("Loading {}...", key);
-            match jira::fetch_workitem_detail(&key) {
-                Ok(detail) => {
-                    self.status_message = key;
-                    self.populate_editable_fields(&detail);
-                    self.detail = Some(detail);
-                    self.detail_mode = DetailMode::Viewing;
-                    self.detail_field_index = 0;
-                    self.save_status = None;
+            self.show_detail_for_key(&key);
+        }
+    }
+
+    /// Request detail for a key. Uses cache if available, otherwise queues a background fetch.
+    fn show_detail_for_key(&mut self, key: &str) {
+        // Check cache first
+        if let Some(detail) = self.detail_cache.get(key).cloned() {
+            self.populate_editable_fields(&detail);
+            self.detail = Some(detail);
+            self.detail_mode = DetailMode::Viewing;
+            self.detail_field_index = 0;
+            self.save_status = None;
+            self.loading_detail = false;
+            return;
+        }
+
+        // Already queued?
+        if self.detail_queue.iter().any(|f| f.key == key) {
+            self.loading_detail = true;
+            return;
+        }
+
+        // Evict oldest if at capacity
+        if self.detail_queue.len() >= MAX_DETAIL_FETCHES {
+            self.detail_queue.pop_front(); // drops receiver + handle detaches
+        }
+
+        // Spawn background fetch
+        let key_owned = key.to_string();
+        let (tx, rx) = mpsc::channel();
+        let handle = thread::spawn({
+            let k = key_owned.clone();
+            move || {
+                let result = jira::fetch_workitem_detail(&k);
+                let _ = tx.send(result);
+            }
+        });
+
+        self.detail_queue.push_back(DetailFetch {
+            key: key_owned,
+            receiver: rx,
+            handle,
+        });
+        self.loading_detail = true;
+    }
+
+    /// Poll all background detail fetches. Call from the event loop.
+    pub fn poll_details(&mut self) {
+        let current_key = self.current_ticket().map(|t| t.key.clone());
+        let mut completed = Vec::new();
+
+        for (i, fetch) in self.detail_queue.iter().enumerate() {
+            match fetch.receiver.try_recv() {
+                Ok(Ok(detail)) => {
+                    completed.push((i, fetch.key.clone(), Some(detail)));
                 }
-                Err(e) => {
-                    self.status_message = format!("Error: {}", e);
+                Ok(Err(_)) => {
+                    completed.push((i, fetch.key.clone(), None));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    completed.push((i, fetch.key.clone(), None));
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+
+        // Process completed in reverse order to preserve indices
+        for (i, key, detail_opt) in completed.into_iter().rev() {
+            self.detail_queue.remove(i);
+            if let Some(detail) = detail_opt {
+                self.detail_cache.insert(key.clone(), detail);
+
+                // If this is the currently focused ticket, display it
+                if current_key.as_deref() == Some(&key) {
+                    if let Some(d) = self.detail_cache.get(&key).cloned() {
+                        self.populate_editable_fields(&d);
+                        self.detail = Some(d);
+                        self.detail_mode = DetailMode::Viewing;
+                        self.detail_field_index = 0;
+                        self.save_status = None;
+                        self.loading_detail = false;
+                    }
                 }
             }
+        }
+
+        // Update loading state for current ticket
+        if let Some(ref ck) = current_key {
+            if self.detail_cache.contains_key(ck) {
+                self.loading_detail = false;
+            } else if self.detail_queue.iter().any(|f| &f.key == ck) {
+                self.loading_detail = true;
+            }
+        }
+    }
+
+    /// Trigger detail fetch for the currently focused ticket in pane 2.
+    pub fn request_current_detail(&mut self) {
+        if self.active_pane != Pane::Tickets {
+            return;
+        }
+        if let Some(item) = self.current_ticket() {
+            let key = item.key.clone();
+            self.show_detail_for_key(&key);
         }
     }
 
@@ -463,6 +574,7 @@ impl App {
             Pane::Tickets => {
                 if self.ticket_index > 0 {
                     self.ticket_index -= 1;
+                    self.request_current_detail();
                 }
             }
             Pane::Detail => {
@@ -484,6 +596,7 @@ impl App {
                 let len = self.current_tickets().len();
                 if len > 0 && self.ticket_index < len - 1 {
                     self.ticket_index += 1;
+                    self.request_current_detail();
                 }
             }
             Pane::Detail => {
@@ -533,10 +646,14 @@ impl App {
                 true
             }
             Pane::Tickets if self.current_ticket().is_some() => {
+                self.active_pane = Pane::Detail;
+                // If detail already loaded/cached, just switch focus
+                if self.detail.is_some() {
+                    return false;
+                }
                 self.loading_detail = true;
-                self.detail = None;
-                self.editable_fields.clear();
-                true
+                self.request_current_detail();
+                false
             }
             _ => false,
         }
