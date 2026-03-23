@@ -85,6 +85,19 @@ fn draw_tickets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         )
     };
 
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(focused_border_style(app, Pane::Tickets));
+
+    if app.loading_tickets {
+        let loading = Paragraph::new("Loading tickets...")
+            .block(block)
+            .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(loading, area);
+        return;
+    }
+
     let tickets = app.current_tickets();
     let items: Vec<ListItem> = tickets
         .iter()
@@ -107,11 +120,6 @@ fn draw_tickets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         })
         .collect();
 
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(focused_border_style(app, Pane::Tickets));
-
     let list = List::new(items)
         .block(block)
         .highlight_style(
@@ -129,7 +137,9 @@ fn draw_tickets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn draw_detail(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let content = if let Some(detail) = &app.detail {
+    let content = if app.loading_detail {
+        "Loading detail...".to_string()
+    } else if let Some(detail) = &app.detail {
         let mut text = String::new();
 
         // Header

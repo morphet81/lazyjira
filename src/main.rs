@@ -53,7 +53,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                 KeyCode::Down => app.move_down(),
                 KeyCode::Left => app.move_left(),
                 KeyCode::Right => app.move_right(),
-                KeyCode::Enter => app.enter(),
+                KeyCode::Enter => {
+                    if app.enter() {
+                        // Redraw with loading indicator before blocking fetch
+                        terminal.draw(|f| ui::draw(f, &app))?;
+                        app.perform_pending_load();
+                    }
+                }
                 KeyCode::Tab => app.toggle_pane(),
                 KeyCode::Char('1') => app.select_pane(1),
                 KeyCode::Char('2') => app.select_pane(2),

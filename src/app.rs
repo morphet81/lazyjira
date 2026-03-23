@@ -25,6 +25,8 @@ pub struct App {
     pub active_pane: Pane,
     pub status_message: String,
     pub should_quit: bool,
+    pub loading_tickets: bool,
+    pub loading_detail: bool,
 }
 
 impl App {
@@ -39,6 +41,8 @@ impl App {
             active_pane: Pane::Projects,
             status_message: String::new(),
             should_quit: false,
+            loading_tickets: false,
+            loading_detail: false,
         }
     }
 
@@ -213,16 +217,34 @@ impl App {
         }
     }
 
-    pub fn enter(&mut self) {
+    /// Prepare loading state on Enter. Returns true if a redraw + fetch is needed.
+    pub fn enter(&mut self) -> bool {
         match self.active_pane {
-            Pane::Projects => {
-                self.load_workitems();
+            Pane::Projects if !self.projects.is_empty() => {
+                self.loading_tickets = true;
+                self.columns.clear();
+                self.detail = None;
                 self.active_pane = Pane::Tickets;
+                true
             }
-            Pane::Tickets => {
-                self.load_detail();
+            Pane::Tickets if self.current_ticket().is_some() => {
+                self.loading_detail = true;
+                self.detail = None;
+                true
             }
-            Pane::Detail => {}
+            _ => false,
+        }
+    }
+
+    /// Perform the pending fetch after the UI has redrawn with loading state.
+    pub fn perform_pending_load(&mut self) {
+        if self.loading_tickets {
+            self.load_workitems();
+            self.loading_tickets = false;
+        }
+        if self.loading_detail {
+            self.load_detail();
+            self.loading_detail = false;
         }
     }
 
