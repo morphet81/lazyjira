@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::io::Write;
 use std::process::Command;
+
+use crate::adf;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct JiraProject {
@@ -108,6 +111,34 @@ pub fn fetch_workitems(project_key: &str) -> Result<Vec<WorkItem>> {
     ])?;
     let items: Vec<WorkItem> = serde_json::from_str(&json)?;
     Ok(items)
+}
+
+pub fn update_workitem(key: &str, field: &str, value: &str) -> Result<()> {
+    match field {
+        "summary" => {
+            run_acli(&[
+                "jira", "workitem", "edit", "--key", key, "--summary", value, "--yes",
+            ])?;
+        }
+        "description" => {
+            // Convert markdown-like text to ADF and save via --from-json
+            let adf_doc = adf::text_to_adf(value);
+            let payload = serde_json::json!({
+                "issues": [key],
+                "description": adf_doc
+            });
+            let mut tmp = tempfile::NamedTempFile::new()
+                .context("Failed to create temp file")?;
+            write!(tmp, "{}", serde_json::to_string(&payload)?)
+                .context("Failed to write temp file")?;
+            let tmp_path = tmp.path().to_string_lossy().to_string();
+            run_acli(&[
+                "jira", "workitem", "edit", "--from-json", &tmp_path, "--yes",
+            ])?;
+        }
+        _ => anyhow::bail!("Unknown editable field: {}", field),
+    }
+    Ok(())
 }
 
 pub fn fetch_workitem_detail(key: &str) -> Result<WorkItemDetail> {
