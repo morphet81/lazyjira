@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use crate::config::LazyJiraConfig;
@@ -8,17 +8,18 @@ use crate::config::LazyJiraConfig;
 /// Create a git worktree for a ticket, copy files, and run setup commands.
 /// Returns the worktree path on success.
 pub fn create_worktree(key: &str, issue_type: &str, config: &LazyJiraConfig) -> Result<String> {
-    let prefix = if issue_type.eq_ignore_ascii_case("bug") {
+    let type_prefix = if issue_type.eq_ignore_ascii_case("bug") {
         "fix"
     } else {
         "feat"
     };
-    let branch = format!("{}/{}", prefix, key);
-    let worktree_path = format!("../{}", key);
+    let branch = format!("{}/{}{}", type_prefix, config.worktree_prefix, key);
+    let base_dir = Path::new(&config.worktree_dir);
+    let worktree_path = base_dir.join(key);
 
     // Create the worktree with a new branch
     let output = Command::new("git")
-        .args(["worktree", "add", "-b", &branch, &worktree_path])
+        .args(["worktree", "add", "-b", &branch, &worktree_path.to_string_lossy()])
         .output()
         .context("Failed to run git worktree add")?;
 
@@ -29,7 +30,7 @@ pub fn create_worktree(key: &str, issue_type: &str, config: &LazyJiraConfig) -> 
 
     // Resolve the absolute worktree path
     let abs_worktree = fs::canonicalize(&worktree_path)
-        .unwrap_or_else(|_| PathBuf::from(&worktree_path));
+        .unwrap_or_else(|_| worktree_path.to_path_buf());
 
     // Copy files matching worktree_copy globs
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
