@@ -120,7 +120,7 @@ Lazyjira reads an optional `.lazyjira` file (TOML) from the working directory. P
 | `worktree_branch_prefix` | string | `""` | Prefix prepended to worktree branch names. E.g. with `"myproject-"`, branch becomes `myproject-feat/proj-123`. |
 | `worktree_copy` | string array | `[]` | Files or glob patterns to copy from the project root into new worktrees (e.g. `[".env", ".vscode/**"]`). |
 | `worktree_commands` | string array | `[]` | Shell commands to run inside the new worktree directory after creation, in order (e.g. `["npm install"]`). |
-| `conventional_commits` | bool | `false` | Prompt for a conventional commit type (`feat`, `fix`, `refactor`, ...) when starting a ticket. When `false`, uses `feat` for non-bugs and `fix` for bugs. |
+| `conventional_commits_worktree_prefix` | bool | `false` | Prompt for a conventional commit type (`feat`, `fix`, `refactor`, ...) when starting a ticket. When `false`, uses `feat` for non-bugs and `fix` for bugs. |
 
 ### Example
 
@@ -130,12 +130,12 @@ worktree_folder_prefix = "myproject-"
 worktree_branch_prefix = "myproject-"
 worktree_copy = [".env", ".vscode/**"]
 worktree_commands = ["npm install"]
-conventional_commits = true
+conventional_commits_worktree_prefix = true
 ```
 
 When you press `s` on a "To Do" ticket (e.g. `NERO-1234`), lazyjira will:
 
-1. If `conventional_commits` is enabled, prompt you to choose a type (`feat`, `fix`, `refactor`, etc.) — bugs always default to `fix`
+1. If `conventional_commits_worktree_prefix` is enabled, prompt you to choose a type (`feat`, `fix`, `refactor`, etc.) — bugs always default to `fix`
 2. Assign the ticket to you and transition it to **In Progress**
 3. Create a git worktree with folder `<worktree_folder_prefix><type>-nero-1234` and branch `<worktree_branch_prefix><type>/nero-1234`
 4. Copy files matching `worktree_copy` patterns into the worktree

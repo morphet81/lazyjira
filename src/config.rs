@@ -29,7 +29,7 @@ pub struct LazyJiraConfig {
 
     /// Prompt for a conventional commit type when starting a ticket (default: false).
     #[serde(default)]
-    pub conventional_commits: bool,
+    pub conventional_commits_worktree_prefix: bool,
 }
 
 fn default_worktree_dir() -> String {
@@ -60,7 +60,7 @@ const EXAMPLE_CONFIG: &str = r#"# lazyjira configuration
 # Prompt for a conventional commit type (feat, fix, refactor, ...) when
 # starting a ticket. When false, uses "feat" for all non-bug tickets and
 # "fix" for bugs (default: false).
-# conventional_commits = false
+# conventional_commits_worktree_prefix = false
 "#;
 
 impl LazyJiraConfig {
