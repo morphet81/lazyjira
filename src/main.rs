@@ -1,7 +1,9 @@
 mod adf;
 mod app;
+mod config;
 mod jira;
 mod ui;
+mod worktree;
 
 use std::io;
 

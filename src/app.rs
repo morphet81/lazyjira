@@ -1,4 +1,5 @@
 use crate::adf;
+use crate::config::LazyJiraConfig;
 use crate::jira::{self, JiraProject, WorkItem, WorkItemDetail};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -125,6 +126,9 @@ pub struct App {
     // Background detail fetching
     detail_queue: VecDeque<DetailFetch>,
     detail_cache: HashMap<String, WorkItemDetail>,
+    // Config
+    #[allow(dead_code)]
+    pub config: LazyJiraConfig,
 }
 
 impl App {
@@ -159,6 +163,7 @@ impl App {
             epics_receiver: None,
             detail_queue: VecDeque::new(),
             detail_cache: HashMap::new(),
+            config: LazyJiraConfig::load(),
         }
     }
 
@@ -482,20 +487,41 @@ impl App {
     }
 
     pub fn perform_start_ticket(&mut self) {
-        let key = match self.current_ticket() {
-            Some(t) => t.key.clone(),
+        let ticket = match self.current_ticket() {
+            Some(t) => t.clone(),
             None => return,
         };
-        match jira::start_workitem(&key) {
-            Ok(()) => {
-                self.status_message = format!("{} started", key);
-                // Invalidate cache for this ticket
-                self.detail_cache.remove(&key);
-            }
+        let key = &ticket.key;
+        let issue_type = ticket
+            .fields
+            .issuetype
+            .as_ref()
+            .map(|t| t.name.as_str())
+            .unwrap_or("Task");
+
+        // Step 1: Assign + transition
+        self.status_message = format!("Assigning {}...", key);
+        match jira::start_workitem(key) {
+            Ok(()) => {}
             Err(e) => {
                 self.status_message = format!("Error starting {}: {}", key, e);
+                return;
             }
         }
+
+        // Step 2: Create worktree + copy files + run commands
+        self.status_message = format!("Creating worktree for {}...", key);
+        match crate::worktree::create_worktree(key, issue_type, &self.config) {
+            Ok(path) => {
+                self.status_message = format!("{} started — worktree at {}", key, path);
+            }
+            Err(e) => {
+                self.status_message = format!("{} started but worktree failed: {}", key, e);
+            }
+        }
+
+        // Invalidate cache for this ticket
+        self.detail_cache.remove(key);
     }
 
     fn populate_editable_fields(&mut self, detail: &WorkItemDetail) {
