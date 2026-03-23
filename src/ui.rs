@@ -198,7 +198,7 @@ fn draw_detail(frame: &mut Frame, app: &App, area: Rect) {
 
     // Loading state
     if app.loading_detail {
-        let loading = Paragraph::new("Loading detail...")
+        let loading = Paragraph::new("Loading details...")
             .block(block)
             .style(Style::default().fg(Color::Yellow));
         frame.render_widget(loading, area);
