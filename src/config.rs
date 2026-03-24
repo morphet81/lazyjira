@@ -39,6 +39,12 @@ pub struct LazyJiraConfig {
     /// pre-loaded with the ticket content (default: false).
     #[serde(default)]
     pub let_claude_address_ticket: bool,
+
+    /// Custom prompt template for the Claude session. Use `$details` as a
+    /// placeholder for the ticket content. If unset, defaults to
+    /// "Address the following ticket: <ticket details>".
+    #[serde(default)]
+    pub custom_claude_prompt: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -60,6 +66,7 @@ impl Default for LazyJiraConfig {
             conventional_commits_worktree_prefix: false,
             zellij_tab: true,
             let_claude_address_ticket: false,
+            custom_claude_prompt: None,
         }
     }
 }
@@ -97,6 +104,14 @@ const EXAMPLE_CONFIG: &str = r#"# lazyjira configuration
 # After opening a Zellij tab, open a right pane with a Claude session
 # pre-loaded with the ticket content (default: false).
 # let_claude_address_ticket = false
+
+# Custom prompt template for the Claude session. Use $details as a
+# placeholder for the ticket content (summary, description, etc.).
+# If unset, defaults to "Address the following ticket: <ticket details>".
+# Examples:
+#   custom_claude_prompt = "Fix the bug described here: $details"
+#   custom_claude_prompt = "Hello"
+# custom_claude_prompt = "Address the following ticket: $details"
 "#;
 
 impl LazyJiraConfig {

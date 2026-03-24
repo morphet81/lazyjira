@@ -13,7 +13,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use log::{debug, info};
+use log::info;
 use simplelog::{ConfigBuilder, LevelFilter, WriteLogger};
 use std::fs::File;
 use std::time::Duration;
@@ -116,9 +116,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                                 if let (Some(path), true) = (worktree_path, app.config.zellij_tab && inside_zellij) {
                                     info!("Opening Zellij tab for {} at {}", ticket_key, path);
                                     worktree::open_zellij_tab(&ticket_key, &path);
-                                    if let (true, Some(text)) = (app.config.let_claude_address_ticket, ticket_text) {
+                                    if let (true, Some(details)) = (app.config.let_claude_address_ticket, ticket_text) {
+                                        let prompt = match &app.config.custom_claude_prompt {
+                                            Some(tpl) => tpl.replace("$details", &details),
+                                            None => format!("Address the following ticket: {}", details),
+                                        };
                                         info!("Opening Claude pane for {}", ticket_key);
-                                        worktree::open_zellij_claude_pane(&path, &text);
+                                        worktree::open_zellij_claude_pane(&path, &prompt);
                                     }
                                 }
                             }

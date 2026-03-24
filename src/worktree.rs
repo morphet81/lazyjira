@@ -162,9 +162,8 @@ pub fn open_zellij_claude_pane(cwd: &str, ticket_text: &str) {
 
     std::thread::sleep(std::time::Duration::from_millis(300));
 
-    // Launch claude with the ticket content as the initial prompt.
-    let prompt = format!("Address the following ticket: {}", ticket_text);
-    let escaped = prompt.replace('\'', "'\\''");
+    // Launch claude with the prompt.
+    let escaped = ticket_text.replace('\'', "'\\''");
     let claude_cmd = format!("claude '{}'\n", escaped);
     let _ = Command::new("zellij")
         .args(["action", "write-chars", &claude_cmd])

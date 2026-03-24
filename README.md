@@ -122,6 +122,8 @@ Lazyjira reads an optional `.lazyjira` file (TOML) from the working directory. P
 | `worktree_commands` | string array | `[]` | Shell commands to run inside the new worktree directory after creation, in order (e.g. `["npm install"]`). |
 | `conventional_commits_worktree_prefix` | bool | `false` | Prompt for a conventional commit type (`feat`, `fix`, `refactor`, ...) when starting a ticket. When `false`, uses `feat` for non-bugs and `fix` for bugs. |
 | `zellij_tab` | bool | `true` | Automatically open a Zellij tab for the new worktree when running inside Zellij. |
+| `let_claude_address_ticket` | bool | `false` | After opening a Zellij tab, open a right pane and launch a Claude session with the ticket content. Requires `zellij_tab = true` and running inside Zellij. |
+| `custom_claude_prompt` | string | _(unset)_ | Custom prompt template for the Claude session. Use `$details` as a placeholder for the ticket content (summary, description, etc.). When unset, defaults to `"Address the following ticket: <ticket details>"`. See [Claude prompt customization](#claude-prompt-customization). |
 
 ### Example
 
@@ -133,6 +135,8 @@ worktree_copy = [".env", ".vscode/**"]
 worktree_commands = ["npm install"]
 conventional_commits_worktree_prefix = true
 zellij_tab = true
+let_claude_address_ticket = true
+custom_claude_prompt = "Address the following ticket: $details"
 ```
 
 When you press `s` on a "To Do" ticket (e.g. `NERO-1234`), lazyjira will:
@@ -146,3 +150,28 @@ When you press `s` on a "To Do" ticket (e.g. `NERO-1234`), lazyjira will:
 7. If running inside **Zellij**, open a new tab named after the ticket key with the worktree as working directory
 
 A progress popup shows each step as it executes, including the name of any custom commands being run.
+
+### Claude prompt customization
+
+When `let_claude_address_ticket` is enabled, lazyjira opens a Claude session in a right pane after creating the worktree. You can customize the prompt sent to Claude using `custom_claude_prompt`.
+
+The special placeholder `$details` is replaced with the ticket content (summary, description, and any custom text fields, with labels). If `$details` is not included in your prompt, the ticket content is **not** appended automatically — only your exact prompt is used.
+
+**Examples:**
+
+```toml
+# Default behavior (when custom_claude_prompt is not set):
+# → "Address the following ticket: Summary: ... Description: ..."
+
+# Include ticket details with a custom instruction:
+custom_claude_prompt = "Fix the bug described in this ticket: $details"
+# → "Fix the bug described in this ticket: Summary: ... Description: ..."
+
+# Use a prompt without ticket details:
+custom_claude_prompt = "Hello, help me with this codebase"
+# → "Hello, help me with this codebase"
+
+# Reference details anywhere in the prompt:
+custom_claude_prompt = "Given these requirements: $details\n\nPlease implement this feature following existing patterns."
+# → "Given these requirements: Summary: ... Description: ...\n\nPlease implement this feature following existing patterns."
+```
