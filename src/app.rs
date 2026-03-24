@@ -154,6 +154,9 @@ pub struct StartPopup {
     pub ticket_key: String,
     pub commit_type: String,
     pub phase: StartPopupPhase,
+    /// Snapshot of the ticket text at the time the popup was opened,
+    /// used for the Claude prompt after worktree creation.
+    pub ticket_text: Option<String>,
 }
 
 pub enum StartPopupPhase {
@@ -527,11 +530,10 @@ impl App {
         }
     }
 
-    /// Copy the current ticket's details (summary, description, custom text fields)
-    /// to the system clipboard via pbcopy.
-    pub fn copy_detail_to_clipboard(&mut self) {
+    /// Build a labeled text representation of the current ticket's editable fields.
+    pub fn build_ticket_text(&self) -> Option<String> {
         if self.editable_fields.is_empty() {
-            return;
+            return None;
         }
         let mut text = String::new();
         for (i, field) in self.editable_fields.iter().enumerate() {
@@ -544,6 +546,16 @@ impl App {
                 text.push_str(&format!("{}: {}", field.label, field.value));
             }
         }
+        Some(text)
+    }
+
+    /// Copy the current ticket's details (summary, description, custom text fields)
+    /// to the system clipboard via pbcopy.
+    pub fn copy_detail_to_clipboard(&mut self) {
+        let text = match self.build_ticket_text() {
+            Some(t) => t,
+            None => return,
+        };
         match copy_to_clipboard(&text) {
             Ok(()) => self.save_status = Some(SaveStatus::Copied),
             Err(e) => self.status_message = format!("Clipboard error: {}", e),
@@ -645,10 +657,12 @@ impl App {
             (StartPopupPhase::Creating { progress: "Starting...".to_string() }, "feat".to_string())
         };
 
+        let ticket_text = self.build_ticket_text();
         self.start_popup = Some(StartPopup {
             ticket_key: ticket.key.clone(),
             commit_type,
             phase,
+            ticket_text,
         });
     }
 

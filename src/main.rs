@@ -96,12 +96,14 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         }
                         app::StartPopupPhase::Done { .. } => {
                             // Any key dismisses — extract info before closing
-                            let (was_ok, ticket_key, worktree_path) = match &app.start_popup.as_ref().unwrap().phase {
+                            let (was_ok, ticket_key, worktree_path, ticket_text) = match &app.start_popup.as_ref().unwrap().phase {
                                 app::StartPopupPhase::Done { result: Ok(path) } => {
-                                    let key = app.start_popup.as_ref().unwrap().ticket_key.clone();
-                                    (true, key, Some(path.clone()))
+                                    let popup = app.start_popup.as_ref().unwrap();
+                                    let key = popup.ticket_key.clone();
+                                    let text = popup.ticket_text.clone();
+                                    (true, key, Some(path.clone()), text)
                                 }
-                                _ => (false, String::new(), None),
+                                _ => (false, String::new(), None, None),
                             };
                             info!("StartPopupPhase::Done — was_ok={}, ticket_key={:?}", was_ok, ticket_key);
                             info!("  worktree_path={:?}, zellij_tab={}", worktree_path, app.config.zellij_tab);
@@ -114,6 +116,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                                 if let (Some(path), true) = (worktree_path, app.config.zellij_tab && inside_zellij) {
                                     info!("Opening Zellij tab for {} at {}", ticket_key, path);
                                     worktree::open_zellij_tab(&ticket_key, &path);
+                                    if let (true, Some(text)) = (app.config.let_claude_address_ticket, ticket_text) {
+                                        info!("Opening Claude pane for {}", ticket_key);
+                                        worktree::open_zellij_claude_pane(&path, &text);
+                                    }
                                 }
                             }
                         }

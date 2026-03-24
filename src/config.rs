@@ -34,6 +34,11 @@ pub struct LazyJiraConfig {
     /// Automatically open a Zellij tab for the new worktree (default: true).
     #[serde(default = "default_true")]
     pub zellij_tab: bool,
+
+    /// After opening a Zellij tab, open a right pane with a Claude session
+    /// pre-loaded with the ticket content (default: false).
+    #[serde(default)]
+    pub let_claude_address_ticket: bool,
 }
 
 fn default_true() -> bool {
@@ -54,6 +59,7 @@ impl Default for LazyJiraConfig {
             worktree_commands: Vec::new(),
             conventional_commits_worktree_prefix: false,
             zellij_tab: true,
+            let_claude_address_ticket: false,
         }
     }
 }
@@ -87,6 +93,10 @@ const EXAMPLE_CONFIG: &str = r#"# lazyjira configuration
 # Automatically open a Zellij tab for the new worktree when running
 # inside Zellij (default: true).
 # zellij_tab = true
+
+# After opening a Zellij tab, open a right pane with a Claude session
+# pre-loaded with the ticket content (default: false).
+# let_claude_address_ticket = false
 "#;
 
 impl LazyJiraConfig {

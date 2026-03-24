@@ -134,6 +134,45 @@ pub fn open_zellij_tab(name: &str, cwd: &str) {
     info!("open_zellij_tab: done for {}", name);
 }
 
+/// Open a right pane in the current Zellij tab, navigate to the worktree,
+/// and launch a Claude session with the ticket content as the initial prompt.
+pub fn open_zellij_claude_pane(cwd: &str, ticket_text: &str) {
+    info!("open_zellij_claude_pane: cwd={:?}", cwd);
+
+    // Open a pane to the right of the current one.
+    let ok = Command::new("zellij")
+        .args(["action", "new-pane", "--direction", "right"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !ok {
+        info!("  new-pane failed, aborting");
+        return;
+    }
+
+    // Wait for the shell to initialise.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // Navigate to the worktree directory.
+    let cd_cmd = format!("cd '{}'\n", cwd.replace('\'', "'\\''"));
+    let _ = Command::new("zellij")
+        .args(["action", "write-chars", &cd_cmd])
+        .output();
+
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Launch claude with the ticket content as the initial prompt.
+    let prompt = format!("Address the following ticket: {}", ticket_text);
+    let escaped = prompt.replace('\'', "'\\''");
+    let claude_cmd = format!("claude '{}'\n", escaped);
+    let _ = Command::new("zellij")
+        .args(["action", "write-chars", &claude_cmd])
+        .output();
+
+    info!("open_zellij_claude_pane: done");
+}
+
 fn copy_glob_matches(cwd: &Path, pattern: &str, dest: &Path) -> Result<()> {
     let full_pattern = cwd.join(pattern).to_string_lossy().into_owned();
     let entries = glob::glob(&full_pattern)
