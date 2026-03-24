@@ -116,13 +116,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                                 if let (Some(path), true) = (worktree_path, app.config.zellij_tab && inside_zellij) {
                                     info!("Opening Zellij tab for {} at {}", ticket_key, path);
                                     worktree::open_zellij_tab(&ticket_key, &path);
-                                    if let (true, Some(details)) = (app.config.let_claude_address_ticket, ticket_text) {
-                                        let prompt = match &app.config.custom_claude_prompt {
+                                    if let (agent @ (config::AiAgent::Claude | config::AiAgent::Cursor), Some(details)) = (app.config.ai_agent, ticket_text) {
+                                        let prompt = match &app.config.custom_agent_prompt {
                                             Some(tpl) => tpl.replace("$details", &details),
                                             None => format!("Address the following ticket: {}", details),
                                         };
-                                        info!("Opening Claude pane for {}", ticket_key);
-                                        worktree::open_zellij_claude_pane(&path, &prompt);
+                                        info!("Opening agent pane for {}", ticket_key);
+                                        worktree::open_zellij_agent_pane(&path, &prompt, agent);
                                     }
                                 }
                             }

@@ -135,11 +135,15 @@ pub fn open_zellij_tab(name: &str, cwd: &str) {
 }
 
 /// Open a right pane in the current Zellij tab, navigate to the worktree,
-/// and launch a Claude session with the ticket content as the initial prompt.
-pub fn open_zellij_claude_pane(cwd: &str, ticket_text: &str) {
-    info!("open_zellij_claude_pane: cwd={:?}", cwd);
+/// and launch an AI agent session with the ticket content as the initial prompt.
+pub fn open_zellij_agent_pane(cwd: &str, prompt: &str, agent: crate::config::AiAgent) {
+    let cli = match agent {
+        crate::config::AiAgent::Claude => "claude",
+        crate::config::AiAgent::Cursor => "agent",
+        crate::config::AiAgent::None => return,
+    };
+    info!("open_zellij_agent_pane: cwd={:?}, cli={}", cwd, cli);
 
-    // Open a pane to the right of the current one.
     let ok = Command::new("zellij")
         .args(["action", "new-pane", "--direction", "right"])
         .output()
@@ -151,10 +155,8 @@ pub fn open_zellij_claude_pane(cwd: &str, ticket_text: &str) {
         return;
     }
 
-    // Wait for the shell to initialise.
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    // Navigate to the worktree directory.
     let cd_cmd = format!("cd '{}'\n", cwd.replace('\'', "'\\''"));
     let _ = Command::new("zellij")
         .args(["action", "write-chars", &cd_cmd])
@@ -162,14 +164,13 @@ pub fn open_zellij_claude_pane(cwd: &str, ticket_text: &str) {
 
     std::thread::sleep(std::time::Duration::from_millis(300));
 
-    // Launch claude with the prompt.
-    let escaped = ticket_text.replace('\'', "'\\''");
-    let claude_cmd = format!("claude '{}'\n", escaped);
+    let escaped = prompt.replace('\'', "'\\''");
+    let agent_cmd = format!("{} '{}'\n", cli, escaped);
     let _ = Command::new("zellij")
-        .args(["action", "write-chars", &claude_cmd])
+        .args(["action", "write-chars", &agent_cmd])
         .output();
 
-    info!("open_zellij_claude_pane: done");
+    info!("open_zellij_agent_pane: done");
 }
 
 fn copy_glob_matches(cwd: &Path, pattern: &str, dest: &Path) -> Result<()> {

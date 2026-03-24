@@ -4,6 +4,15 @@ use std::path::Path;
 
 const CONFIG_FILE: &str = ".lazyjira";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AiAgent {
+    #[default]
+    None,
+    Claude,
+    Cursor,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct LazyJiraConfig {
@@ -35,16 +44,17 @@ pub struct LazyJiraConfig {
     #[serde(default = "default_true")]
     pub zellij_tab: bool,
 
-    /// After opening a Zellij tab, open a right pane with a Claude session
-    /// pre-loaded with the ticket content (default: false).
+    /// AI agent to open in a Zellij pane after creating the worktree.
+    /// "claude" opens Claude Code, "cursor" opens Cursor CLI agent,
+    /// "none" disables the feature (default: "none").
     #[serde(default)]
-    pub let_claude_address_ticket: bool,
+    pub ai_agent: AiAgent,
 
-    /// Custom prompt template for the Claude session. Use `$details` as a
+    /// Custom prompt template for the AI agent session. Use `$details` as a
     /// placeholder for the ticket content. If unset, defaults to
     /// "Address the following ticket: <ticket details>".
-    #[serde(default)]
-    pub custom_claude_prompt: Option<String>,
+    #[serde(default, alias = "custom_claude_prompt")]
+    pub custom_agent_prompt: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -65,8 +75,8 @@ impl Default for LazyJiraConfig {
             worktree_commands: Vec::new(),
             conventional_commits_worktree_prefix: false,
             zellij_tab: true,
-            let_claude_address_ticket: false,
-            custom_claude_prompt: None,
+            ai_agent: AiAgent::None,
+            custom_agent_prompt: None,
         }
     }
 }
@@ -101,17 +111,19 @@ const EXAMPLE_CONFIG: &str = r#"# lazyjira configuration
 # inside Zellij (default: true).
 # zellij_tab = true
 
-# After opening a Zellij tab, open a right pane with a Claude session
-# pre-loaded with the ticket content (default: false).
-# let_claude_address_ticket = false
+# AI agent to open in a Zellij pane after creating the worktree.
+# Supported values: "none", "claude", "cursor" (default: "none").
+#   - "claude" opens a Claude Code CLI session
+#   - "cursor" opens a Cursor CLI agent session
+# ai_agent = "none"
 
-# Custom prompt template for the Claude session. Use $details as a
+# Custom prompt template for the AI agent session. Use $details as a
 # placeholder for the ticket content (summary, description, etc.).
 # If unset, defaults to "Address the following ticket: <ticket details>".
 # Examples:
-#   custom_claude_prompt = "Fix the bug described here: $details"
-#   custom_claude_prompt = "Hello"
-# custom_claude_prompt = "Address the following ticket: $details"
+#   custom_agent_prompt = "Fix the bug described here: $details"
+#   custom_agent_prompt = "Hello"
+# custom_agent_prompt = "Address the following ticket: $details"
 "#;
 
 impl LazyJiraConfig {
