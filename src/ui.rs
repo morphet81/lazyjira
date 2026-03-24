@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::{App, Pane, SaveStatus, StartPopup, StartPopupPhase, COMMIT_TYPES};
+use crate::config::AiAgent;
 
 const LEFT_WIDTH: u16 = 60;
 
@@ -32,7 +33,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 
     if let Some(ref popup) = app.start_popup {
-        draw_start_popup(frame, popup, size);
+        draw_start_popup(frame, popup, size, &app.config.ai_agent);
     }
 }
 
@@ -523,7 +524,7 @@ fn draw_epic_popup(frame: &mut Frame, app: &App, pane2_area: Rect) {
     frame.render_stateful_widget(list, popup_area, &mut state);
 }
 
-fn draw_start_popup(frame: &mut Frame, popup: &StartPopup, area: Rect) {
+fn draw_start_popup(frame: &mut Frame, popup: &StartPopup, area: Rect, agents: &[AiAgent]) {
     match &popup.phase {
         StartPopupPhase::ChoosingType { selected } => {
             let title = format!(" Start {} — choose type ", popup.ticket_key);
@@ -585,7 +586,71 @@ fn draw_start_popup(frame: &mut Frame, popup: &StartPopup, area: Rect) {
                 Color::Red,
             );
         }
+        StartPopupPhase::ChoosingAgent { selected, path } => {
+            draw_agent_chooser(frame, area, *selected, path, agents);
+        }
     }
+}
+
+fn draw_agent_chooser(
+    frame: &mut Frame,
+    area: Rect,
+    selected: usize,
+    path: &str,
+    agents: &[AiAgent],
+) {
+    let content_lines = 5 + agents.len() as u16;
+    let popup_width = area.width.clamp(30, 60);
+    let popup_height = (content_lines + 4).min(area.height.saturating_sub(2));
+    let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title(" Success ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let mut lines: Vec<Line> = vec![
+        Line::from("Worktree created at:"),
+        Line::from(Span::styled(path, Style::default().fg(Color::Green))),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Select agent:",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ];
+
+    for (i, agent) in agents.iter().enumerate() {
+        let marker = if i == selected { "▸ " } else { "  " };
+        let style = if i == selected {
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", marker, agent.label()),
+            style,
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Esc to skip",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
 }
 
 fn draw_start_message(frame: &mut Frame, area: Rect, title: &str, body: &str, color: Color) {

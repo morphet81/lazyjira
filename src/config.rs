@@ -13,6 +13,16 @@ pub enum AiAgent {
     Cursor,
 }
 
+impl AiAgent {
+    pub fn label(&self) -> &'static str {
+        match self {
+            AiAgent::None => "None",
+            AiAgent::Claude => "Claude Code",
+            AiAgent::Cursor => "Cursor Agent",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct LazyJiraConfig {
@@ -44,11 +54,12 @@ pub struct LazyJiraConfig {
     #[serde(default = "default_true")]
     pub zellij_tab: bool,
 
-    /// AI agent to open in a Zellij pane after creating the worktree.
-    /// "claude" opens Claude Code, "cursor" opens Cursor CLI agent,
-    /// "none" disables the feature (default: "none").
-    #[serde(default)]
-    pub ai_agent: AiAgent,
+    /// AI agent(s) to open in a Zellij pane after creating the worktree.
+    /// Accepts a single string ("claude", "cursor", "none") or an array
+    /// (["claude", "cursor"]). When multiple agents are configured, the user
+    /// picks which one to launch after worktree creation. Default: none.
+    #[serde(default, deserialize_with = "deserialize_ai_agents")]
+    pub ai_agent: Vec<AiAgent>,
 
     /// Custom prompt template for the AI agent session. Use `$details` as a
     /// placeholder for the ticket content. If unset, defaults to
@@ -75,7 +86,7 @@ impl Default for LazyJiraConfig {
             worktree_commands: Vec::new(),
             conventional_commits_worktree_prefix: false,
             zellij_tab: true,
-            ai_agent: AiAgent::None,
+            ai_agent: Vec::new(),
             custom_agent_prompt: None,
         }
     }
@@ -112,10 +123,12 @@ const EXAMPLE_CONFIG: &str = r#"# lazyjira configuration
 # zellij_tab = true
 
 # AI agent to open in a Zellij pane after creating the worktree.
-# Supported values: "none", "claude", "cursor" (default: "none").
+# Accepts a single value or an array: "none", "claude", "cursor".
 #   - "claude" opens a Claude Code CLI session
 #   - "cursor" opens a Cursor CLI agent session
+# When multiple agents are given, you choose which one after worktree creation.
 # ai_agent = "none"
+# ai_agent = ["claude", "cursor"]
 
 # Custom prompt template for the AI agent session. Use $details as a
 # placeholder for the ticket content (summary, description, etc.).
@@ -125,6 +138,24 @@ const EXAMPLE_CONFIG: &str = r#"# lazyjira configuration
 #   custom_agent_prompt = "Hello"
 # custom_agent_prompt = "Address the following ticket: $details"
 "#;
+
+fn deserialize_ai_agents<'de, D>(deserializer: D) -> Result<Vec<AiAgent>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(AiAgent),
+        Many(Vec<AiAgent>),
+    }
+
+    let agents = match OneOrMany::deserialize(deserializer)? {
+        OneOrMany::One(a) => vec![a],
+        OneOrMany::Many(v) => v,
+    };
+    Ok(agents.into_iter().filter(|a| *a != AiAgent::None).collect())
+}
 
 impl LazyJiraConfig {
     /// Create a `.lazyjira` config file with example content.

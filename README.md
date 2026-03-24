@@ -100,12 +100,14 @@ The interface has three panes: **Projects** (1), **Tickets** (2), and **Detail**
 
 | Key | Description |
 |-----|-------------|
-| `Up` / `Down` | Navigate commit type list |
-| `Enter` | Confirm selected type and start |
-| `Esc` | Cancel |
-| Any key | Dismiss popup (after operation completes) |
+| `Up` / `Down` | Navigate commit type list / agent list |
+| `Enter` | Confirm selected type or agent and start |
+| `Esc` | Cancel (type selection) / skip agent launch (agent selection) |
+| Any key | Dismiss popup (after operation completes, when no agent choice) |
 
 For bug tickets, the type is automatically set to `fix`. For all other ticket types, a popup lets you choose a conventional commit type (`feat`, `fix`, `refactor`, `chore`, etc.).
+
+When multiple AI agents are configured (e.g. `ai_agent = ["claude", "cursor"]`), the success popup shows an agent selector instead of "Press any key to close". Pick an agent with `Enter` or press `Esc` to open the Zellij tab without launching an agent.
 
 ## Configuration
 
@@ -122,7 +124,7 @@ Lazyjira reads an optional `.lazyjira` file (TOML) from the working directory. P
 | `worktree_commands` | string array | `[]` | Shell commands to run inside the new worktree directory after creation, in order (e.g. `["npm install"]`). |
 | `conventional_commits_worktree_prefix` | bool | `false` | Prompt for a conventional commit type (`feat`, `fix`, `refactor`, ...) when starting a ticket. When `false`, uses `feat` for non-bugs and `fix` for bugs. |
 | `zellij_tab` | bool | `true` | Automatically open a Zellij tab for the new worktree when running inside Zellij. |
-| `ai_agent` | string | `"none"` | AI agent to open in a Zellij pane after creating the worktree. `"claude"` for Claude Code CLI, `"cursor"` for Cursor CLI agent, `"none"` to disable. Requires `zellij_tab = true` and running inside Zellij. |
+| `ai_agent` | string or array | `"none"` | AI agent to open in a Zellij pane after creating the worktree. Accepts a single value (`"claude"`, `"cursor"`, `"none"`) or an array (`["claude", "cursor"]`). When multiple agents are given, a chooser popup appears after worktree creation. Requires `zellij_tab = true` and running inside Zellij. |
 | `custom_agent_prompt` | string | _(unset)_ | Custom prompt template for the AI agent session. Use `$details` as a placeholder for the ticket content (summary, description, etc.). When unset, defaults to `"Address the following ticket: <ticket details>"`. See [Agent prompt customization](#agent-prompt-customization). |
 
 ### Example
@@ -135,7 +137,7 @@ worktree_copy = [".env", ".vscode/**"]
 worktree_commands = ["npm install"]
 conventional_commits_worktree_prefix = true
 zellij_tab = true
-ai_agent = "claude"
+ai_agent = ["claude", "cursor"]
 custom_agent_prompt = "Address the following ticket: $details"
 ```
 
@@ -153,7 +155,7 @@ A progress popup shows each step as it executes, including the name of any custo
 
 ### Agent prompt customization
 
-When `ai_agent` is set to `"claude"` or `"cursor"`, lazyjira opens an AI agent session in a right Zellij pane after creating the worktree. You can customize the prompt using `custom_agent_prompt`.
+When `ai_agent` is set to `"claude"`, `"cursor"`, or an array like `["claude", "cursor"]`, lazyjira opens an AI agent session in a right Zellij pane after creating the worktree. When multiple agents are configured, a chooser popup lets you pick which one to launch. You can customize the prompt using `custom_agent_prompt`.
 
 The special placeholder `$details` is replaced with the ticket content (summary, description, and any custom text fields, with labels). If `$details` is not included in your prompt, the ticket content is **not** appended automatically — only your exact prompt is used.
 
@@ -165,6 +167,9 @@ ai_agent = "claude"
 
 # Use Cursor CLI agent:
 ai_agent = "cursor"
+
+# Offer a choice between both agents after worktree creation:
+# ai_agent = ["claude", "cursor"]
 
 # Default behavior (when custom_agent_prompt is not set):
 # → "Address the following ticket: Summary: ... Description: ..."

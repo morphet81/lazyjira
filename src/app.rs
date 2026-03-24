@@ -166,6 +166,8 @@ pub enum StartPopupPhase {
     Creating { progress: String },
     /// Done — success or error. Path is stored for Zellij tab creation.
     Done { result: Result<String, String> },
+    /// Multiple AI agents configured — user picks which one to launch.
+    ChoosingAgent { selected: usize, path: String },
 }
 
 impl App {
@@ -370,6 +372,7 @@ impl App {
     }
 
     /// Refresh work items while preserving current column and ticket selection.
+    /// The existing ticket list stays visible until the refresh completes.
     pub fn refresh_workitems(&mut self) {
         if self.projects.is_empty() || self.columns.is_empty() {
             return;
@@ -377,7 +380,6 @@ impl App {
         let project_key = self.projects[self.project_index].key.clone();
         let prev_column = self.column_index;
         let prev_ticket = self.ticket_index;
-        self.loading_tickets = true;
         let epic = self.selected_epic.clone();
         let (tx, rx) = mpsc::channel();
         self.tickets_receiver = Some(TicketsReceiver {
@@ -692,6 +694,22 @@ impl App {
         }
     }
 
+    pub fn agent_popup_up(&mut self) {
+        if let Some(StartPopup { phase: StartPopupPhase::ChoosingAgent { selected, .. }, .. }) = &mut self.start_popup {
+            if *selected > 0 {
+                *selected -= 1;
+            }
+        }
+    }
+
+    pub fn agent_popup_down(&mut self) {
+        if let Some(StartPopup { phase: StartPopupPhase::ChoosingAgent { selected, .. }, .. }) = &mut self.start_popup {
+            if *selected + 1 < self.config.ai_agent.len() {
+                *selected += 1;
+            }
+        }
+    }
+
     /// Spawns the start-ticket work in a background thread. Only runs when in Creating phase.
     pub fn run_start_ticket(&mut self) {
         let popup = match self.start_popup.as_ref() {
@@ -736,7 +754,14 @@ impl App {
                         if result.is_ok() {
                             self.detail_cache.remove(&popup.ticket_key);
                         }
-                        popup.phase = StartPopupPhase::Done { result };
+                        match result {
+                            Ok(path) if self.config.ai_agent.len() > 1 => {
+                                popup.phase = StartPopupPhase::ChoosingAgent { selected: 0, path };
+                            }
+                            other => {
+                                popup.phase = StartPopupPhase::Done { result: other };
+                            }
+                        }
                     }
                     self.start_receiver = None;
                     return;

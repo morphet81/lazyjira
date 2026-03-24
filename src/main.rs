@@ -94,6 +94,56 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         app::StartPopupPhase::Creating { .. } => {
                             // In progress — ignore keys
                         }
+                        app::StartPopupPhase::ChoosingAgent { .. } => {
+                            match key.code {
+                                KeyCode::Up => app.agent_popup_up(),
+                                KeyCode::Down => app.agent_popup_down(),
+                                KeyCode::Enter => {
+                                    let (ticket_key, worktree_path, ticket_text, selected_agent) =
+                                        match &app.start_popup.as_ref().unwrap().phase {
+                                            app::StartPopupPhase::ChoosingAgent { selected, path } => {
+                                                let popup = app.start_popup.as_ref().unwrap();
+                                                let agent = app.config.ai_agent.get(*selected).copied();
+                                                (popup.ticket_key.clone(), path.clone(), popup.ticket_text.clone(), agent)
+                                            }
+                                            _ => unreachable!(),
+                                        };
+                                    app.close_start_popup();
+                                    app.refresh_workitems();
+                                    let inside_zellij = worktree::is_inside_zellij();
+                                    if app.config.zellij_tab && inside_zellij {
+                                        info!("Opening Zellij tab for {} at {}", ticket_key, worktree_path);
+                                        worktree::open_zellij_tab(&ticket_key, &worktree_path);
+                                        if let (Some(agent), Some(details)) = (selected_agent, ticket_text) {
+                                            let prompt = match &app.config.custom_agent_prompt {
+                                                Some(tpl) => tpl.replace("$details", &details),
+                                                None => format!("Address the following ticket: {}", details),
+                                            };
+                                            info!("Opening agent pane ({}) for {}", agent.label(), ticket_key);
+                                            worktree::open_zellij_agent_pane(&worktree_path, &prompt, agent);
+                                        }
+                                    }
+                                }
+                                KeyCode::Esc => {
+                                    let (ticket_key, worktree_path) =
+                                        match &app.start_popup.as_ref().unwrap().phase {
+                                            app::StartPopupPhase::ChoosingAgent { path, .. } => {
+                                                let popup = app.start_popup.as_ref().unwrap();
+                                                (popup.ticket_key.clone(), path.clone())
+                                            }
+                                            _ => unreachable!(),
+                                        };
+                                    app.close_start_popup();
+                                    app.refresh_workitems();
+                                    let inside_zellij = worktree::is_inside_zellij();
+                                    if app.config.zellij_tab && inside_zellij {
+                                        info!("Opening Zellij tab (no agent) for {} at {}", ticket_key, worktree_path);
+                                        worktree::open_zellij_tab(&ticket_key, &worktree_path);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                         app::StartPopupPhase::Done { .. } => {
                             // Any key dismisses — extract info before closing
                             let (was_ok, ticket_key, worktree_path, ticket_text) = match &app.start_popup.as_ref().unwrap().phase {
@@ -110,13 +160,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                             app.close_start_popup();
                             if was_ok {
                                 app.refresh_workitems();
-                                // Open Zellij tab if enabled and running inside Zellij
                                 let inside_zellij = worktree::is_inside_zellij();
                                 info!("  inside_zellij={}", inside_zellij);
                                 if let (Some(path), true) = (worktree_path, app.config.zellij_tab && inside_zellij) {
                                     info!("Opening Zellij tab for {} at {}", ticket_key, path);
                                     worktree::open_zellij_tab(&ticket_key, &path);
-                                    if let (agent @ (config::AiAgent::Claude | config::AiAgent::Cursor), Some(details)) = (app.config.ai_agent, ticket_text) {
+                                    if let (Some(&agent), Some(details)) = (app.config.ai_agent.first(), ticket_text) {
                                         let prompt = match &app.config.custom_agent_prompt {
                                             Some(tpl) => tpl.replace("$details", &details),
                                             None => format!("Address the following ticket: {}", details),
