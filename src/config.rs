@@ -4,7 +4,7 @@ use std::path::Path;
 
 const CONFIG_FILE: &str = ".lazyjira";
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct LazyJiraConfig {
     /// Directory where worktrees are created. Defaults to current folder (".").
@@ -42,6 +42,20 @@ fn default_true() -> bool {
 
 fn default_worktree_dir() -> String {
     ".".to_string()
+}
+
+impl Default for LazyJiraConfig {
+    fn default() -> Self {
+        Self {
+            worktree_dir: default_worktree_dir(),
+            worktree_folder_prefix: String::new(),
+            worktree_branch_prefix: String::new(),
+            worktree_copy: Vec::new(),
+            worktree_commands: Vec::new(),
+            conventional_commits_worktree_prefix: false,
+            zellij_tab: true,
+        }
+    }
 }
 
 const EXAMPLE_CONFIG: &str = r#"# lazyjira configuration

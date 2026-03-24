@@ -13,6 +13,9 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use log::{debug, info};
+use simplelog::{ConfigBuilder, LevelFilter, WriteLogger};
+use std::fs::File;
 use std::time::Duration;
 use ratatui::prelude::CrosstermBackend;
 use ratatui::Terminal;
@@ -20,6 +23,26 @@ use ratatui::Terminal;
 use app::App;
 
 fn main() -> Result<()> {
+    // Initialize file logger — stdout is unavailable (raw mode + alternate screen)
+    let log_level = match std::env::var("LAZYJIRA_LOG").as_deref() {
+        Ok("trace") => LevelFilter::Trace,
+        Ok("debug") => LevelFilter::Debug,
+        Ok("warn") => LevelFilter::Warn,
+        Ok("error") => LevelFilter::Error,
+        Ok("off") => LevelFilter::Off,
+        _ => LevelFilter::Info,
+    };
+    if log_level != LevelFilter::Off {
+        if let Ok(file) = File::create("/tmp/lazyjira.log") {
+            let _ = WriteLogger::init(
+                log_level,
+                ConfigBuilder::new().set_time_format_rfc3339().build(),
+                file,
+            );
+        }
+    }
+
+    info!("lazyjira starting");
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -80,11 +103,16 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                                 }
                                 _ => (false, String::new(), None),
                             };
+                            info!("StartPopupPhase::Done — was_ok={}, ticket_key={:?}", was_ok, ticket_key);
+                            info!("  worktree_path={:?}, zellij_tab={}", worktree_path, app.config.zellij_tab);
                             app.close_start_popup();
                             if was_ok {
                                 app.refresh_workitems();
-                                // Open Zellij tab if running inside Zellij
-                                if let (Some(path), true) = (worktree_path, app.config.zellij_tab && std::env::var("ZELLIJ").is_ok()) {
+                                // Open Zellij tab if enabled and running inside Zellij
+                                let inside_zellij = worktree::is_inside_zellij();
+                                info!("  inside_zellij={}", inside_zellij);
+                                if let (Some(path), true) = (worktree_path, app.config.zellij_tab && inside_zellij) {
+                                    info!("Opening Zellij tab for {} at {}", ticket_key, path);
                                     worktree::open_zellij_tab(&ticket_key, &path);
                                 }
                             }

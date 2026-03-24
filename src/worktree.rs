@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use log::{debug, info};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -91,11 +92,46 @@ fn run_git(args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-/// Open a new Zellij tab with the given name and working directory.
+/// Check whether we are running inside a Zellij session.
+/// `zellij action` commands only work when the ZELLIJ env var is set,
+/// meaning we are inside an active Zellij session.
+pub fn is_inside_zellij() -> bool {
+    let inside = std::env::var("ZELLIJ").is_ok();
+    info!("is_inside_zellij() = {} (ZELLIJ env var)", inside);
+    inside
+}
+
+/// Open a new Zellij tab named after the ticket, wait for it to be ready,
+/// then navigate to the worktree directory.
 pub fn open_zellij_tab(name: &str, cwd: &str) {
-    let _ = Command::new("zellij")
-        .args(["action", "new-tab", "--name", name, "--cwd", cwd])
+    info!("open_zellij_tab: name={:?}, cwd={:?}", name, cwd);
+
+    // Create a new tab named after the ticket key.
+    let new_tab_result = Command::new("zellij")
+        .args(["action", "new-tab", "--name", name])
         .output();
+    let ok = new_tab_result
+        .as_ref()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    debug!("  new-tab result: ok={}, output={:?}", ok, new_tab_result);
+
+    if !ok {
+        info!("  new-tab failed, aborting");
+        return;
+    }
+
+    // Wait for the new tab's shell to initialise.
+    debug!("  sleeping 500ms for shell init");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // Navigate to the worktree directory in the new tab.
+    let cd_cmd = format!("cd '{}'\n", cwd.replace('\'', "'\\''"));
+    let write_result = Command::new("zellij")
+        .args(["action", "write-chars", &cd_cmd])
+        .output();
+    debug!("  write-chars result: {:?}", write_result);
+    info!("open_zellij_tab: done for {}", name);
 }
 
 fn copy_glob_matches(cwd: &Path, pattern: &str, dest: &Path) -> Result<()> {
