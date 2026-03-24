@@ -225,8 +225,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                             }
                         }
                         KeyCode::Char('r') => {
-                            if app.active_pane == app::Pane::Tickets {
-                                app.refresh_workitems();
+                            match app.active_pane {
+                                app::Pane::Projects => app.load_projects(),
+                                app::Pane::Tickets => app.refresh_workitems(),
+                                app::Pane::Detail => app.refresh_detail(),
                             }
                         }
                         KeyCode::Char('C') => {

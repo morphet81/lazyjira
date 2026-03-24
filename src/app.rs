@@ -517,6 +517,15 @@ impl App {
         self.loading_detail = true;
     }
 
+    /// Re-fetch the currently displayed detail, bypassing cache.
+    pub fn refresh_detail(&mut self) {
+        if let Some(ref detail) = self.detail {
+            let key = detail.key.clone();
+            self.detail_cache.remove(&key);
+            self.show_detail_for_key(&key);
+        }
+    }
+
     /// Poll all background detail fetches. Call from the event loop.
     pub fn poll_details(&mut self) {
         let current_key = self.current_ticket().map(|t| t.key.clone());

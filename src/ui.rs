@@ -243,7 +243,7 @@ fn draw_detail(frame: &mut Frame, app: &App, area: Rect) {
     } else if app.is_editing() {
         " -- NORMAL --  i insert | a append | o open line | dd del line | x del char | Esc save+quit"
     } else if app.active_pane == Pane::Detail {
-        " ↑↓ select | e edit | q quit"
+        " ↑↓ select | e edit | r refresh | q quit"
     } else {
         ""
     };
