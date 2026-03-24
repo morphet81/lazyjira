@@ -231,6 +231,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                                 app::Pane::Detail => app.refresh_detail(),
                             }
                         }
+                        KeyCode::Char('c') => {
+                            if app.active_pane == app::Pane::Detail {
+                                app.copy_detail_to_clipboard();
+                            }
+                        }
                         KeyCode::Char('C') => {
                             match config::LazyJiraConfig::create_default() {
                                 Ok(true) => {

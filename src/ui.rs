@@ -243,7 +243,7 @@ fn draw_detail(frame: &mut Frame, app: &App, area: Rect) {
     } else if app.is_editing() {
         " -- NORMAL --  i insert | a append | o open line | dd del line | x del char | Esc save+quit"
     } else if app.active_pane == Pane::Detail {
-        " ↑↓ select | e edit | r refresh | q quit"
+        " ↑↓ select | e edit | c copy | r refresh | q quit"
     } else {
         ""
     };
@@ -452,6 +452,7 @@ fn build_detail_title<'a>(
             let (text, color) = match status {
                 SaveStatus::Saving => ("Saving...", Color::Yellow),
                 SaveStatus::Saved => ("Saved!", Color::Green),
+                SaveStatus::Copied => ("Copied ticket contents", Color::Green),
                 SaveStatus::Error(_) => ("Error saving details", Color::Red),
             };
             let right = format!(" {} ", text);

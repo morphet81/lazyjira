@@ -54,6 +54,7 @@ pub enum DetailMode {
 pub enum SaveStatus {
     Saving,
     Saved,
+    Copied,
     #[allow(dead_code)]
     Error(String),
 }
@@ -523,6 +524,29 @@ impl App {
             let key = detail.key.clone();
             self.detail_cache.remove(&key);
             self.show_detail_for_key(&key);
+        }
+    }
+
+    /// Copy the current ticket's details (summary, description, custom text fields)
+    /// to the system clipboard via pbcopy.
+    pub fn copy_detail_to_clipboard(&mut self) {
+        if self.editable_fields.is_empty() {
+            return;
+        }
+        let mut text = String::new();
+        for (i, field) in self.editable_fields.iter().enumerate() {
+            if i > 0 {
+                text.push_str("\n\n");
+            }
+            if field.multiline {
+                text.push_str(&format!("{}:\n{}", field.label, field.value));
+            } else {
+                text.push_str(&format!("{}: {}", field.label, field.value));
+            }
+        }
+        match copy_to_clipboard(&text) {
+            Ok(()) => self.save_status = Some(SaveStatus::Copied),
+            Err(e) => self.status_message = format!("Clipboard error: {}", e),
         }
     }
 
@@ -1326,4 +1350,20 @@ impl App {
             self.edit_cursor_col = self.edit_cursor_col.min(line_len);
         }
     }
+}
+
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(text.as_bytes())
+        .map_err(|e| e.to_string())?;
+    child.wait().map_err(|e| e.to_string())?;
+    Ok(())
 }
