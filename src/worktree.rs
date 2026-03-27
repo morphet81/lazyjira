@@ -165,12 +165,7 @@ pub fn open_zellij_agent_pane(cwd: &str, prompt: &str, agent: crate::config::AiA
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     let escaped = prompt.replace('\'', "'\\''");
-    let extra_flags = match agent {
-        crate::config::AiAgent::Claude => " --permission-mode acceptEdits",
-        crate::config::AiAgent::Cursor => " --trust",
-        crate::config::AiAgent::None => "",
-    };
-    let agent_cmd = format!("{}{} '{}'\n", cli, extra_flags, escaped);
+    let agent_cmd = format!("{} '{}'\n", cli, escaped);
     let _ = Command::new("zellij")
         .args(["action", "write-chars", &agent_cmd])
         .output();
