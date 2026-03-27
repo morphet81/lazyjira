@@ -20,7 +20,7 @@ Maintainers bump the semver in `Cargo.toml`, tag, and push; [GitHub Actions](htt
 
 1. Install [cargo-edit](https://github.com/killercup/cargo-edit) once: `cargo install cargo-edit`
 2. From the repo root: `./scripts/bump-version.sh patch` (or `minor` / `major`)
-3. Push the commit and tag (the script prints the exact commands), or run `./scripts/bump-version.sh --push patch` to push immediately
+3. The script asks whether to push the branch and tag to `origin` (answer `y` to publish). Use `./scripts/bump-version.sh --push patch` to push without prompting; in a non-interactive shell it only prints the `git push` commands.
 
 Prebuilt assets use names like `lazyjira-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` (Linux and macOS) or `.zip` on Windows, each with a `.sha256` checksum file.
 
