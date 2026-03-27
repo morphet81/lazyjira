@@ -14,6 +14,16 @@ Requires Rust and `acli` configured for your Jira instance.
 
 This builds a release binary and copies it to `~/.cargo/bin/`.
 
+## Releasing
+
+Maintainers bump the semver in `Cargo.toml`, tag, and push; [GitHub Actions](https://github.com/morphet81/lazyjira/actions) then builds binaries and publishes a [release](https://github.com/morphet81/lazyjira/releases) with archives per platform.
+
+1. Install [cargo-edit](https://github.com/killercup/cargo-edit) once: `cargo install cargo-edit`
+2. From the repo root: `./scripts/bump-version.sh patch` (or `minor` / `major`)
+3. Push the commit and tag (the script prints the exact commands), or run `./scripts/bump-version.sh --push patch` to push immediately
+
+Prebuilt assets use names like `lazyjira-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` (Linux and macOS) or `.zip` on Windows, each with a `.sha256` checksum file.
+
 ## Usage
 
 ```sh
