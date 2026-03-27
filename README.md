@@ -6,7 +6,28 @@ Lazyjira uses [acli](https://bobswift.atlassian.net/wiki/spaces/ACLI/overview) (
 
 ## Installation
 
-Requires Rust and `acli` configured for your Jira instance.
+You need [acli](https://bobswift.atlassian.net/wiki/spaces/ACLI/overview) configured for your Jira instance, regardless of how you install the binary.
+
+### Homebrew (macOS and Linux)
+
+Prebuilt binaries are available from the [morphet81/homebrew-tools](https://github.com/morphet81/homebrew-tools) tap:
+
+```bash
+brew tap morphet81/homebrew-tools
+brew install lazyjira
+```
+
+Or install in one step without tapping first:
+
+```bash
+brew install morphet81/homebrew-tools/lazyjira
+```
+
+See the tap repository for pinned versions (`lazyjira@…`), upgrades, and platform notes.
+
+### Build from source
+
+Requires Rust.
 
 ```sh
 ./install.sh
