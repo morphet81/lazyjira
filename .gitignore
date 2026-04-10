@@ -1,3 +1,6 @@
 /target
 .lazyjira
 *.log
+.gitleaks.toml
+.cursor/
+.DS_Store
