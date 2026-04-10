@@ -77,6 +77,7 @@ The interface has three panes: **Projects** (1), **Tickets** (2), and **Detail**
 | `P` | Sort tickets by priority |
 | `e` | Open epic filter popup |
 | `r` | Refresh tickets |
+| `a` | Assign ticket to you, transition to In Progress, and copy ticket info to clipboard |
 | `s` | Start ticket — assign to you, transition to In Progress, and create a git worktree |
 
 ### Epic filter popup
