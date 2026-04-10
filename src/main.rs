@@ -77,6 +77,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                 // q always quits, regardless of loading state
                 if key.code == KeyCode::Char('q') && !app.is_editing() && !app.is_insert_mode() {
                     app.should_quit = true;
+                } else if matches!(
+                    &app.assign_popup,
+                    Some(app::AssignPopup { phase: app::AssignPopupPhase::Done { success: false, .. }, .. })
+                ) {
+                    // Error popup — any key dismisses
+                    app.dismiss_assign_popup();
                 } else if app.start_popup.is_some() {
                     match &app.start_popup.as_ref().unwrap().phase {
                         app::StartPopupPhase::ChoosingType { .. } => {
@@ -309,6 +315,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                                 }
                             }
                         }
+                        KeyCode::Char('a') => {
+                            app.assign_current_ticket();
+                        }
                         KeyCode::Char('s') => {
                             if app.start_current_ticket() {
                                 app.open_start_popup();
@@ -334,6 +343,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         app.poll_details();
         app.poll_epics();
         app.poll_start_ticket();
+        app.poll_assign_ticket();
+        app.check_assign_popup_timeout();
 
         // Once projects finish loading for the first time, load tickets
         if !projects_loaded && !app.projects.is_empty() && !had_projects {

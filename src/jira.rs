@@ -147,6 +147,16 @@ pub fn start_workitem(key: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn assign_workitem(key: &str) -> Result<()> {
+    run_acli(&[
+        "jira", "workitem", "assign", "--key", key, "--assignee", "@me", "--yes",
+    ])?;
+    run_acli(&[
+        "jira", "workitem", "transition", "--key", key, "--status", "In Progress", "--yes",
+    ])?;
+    Ok(())
+}
+
 pub fn update_workitem(key: &str, field: &str, value: &str) -> Result<()> {
     match field {
         "summary" => {

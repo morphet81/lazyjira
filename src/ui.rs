@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, Pane, SaveStatus, StartPopup, StartPopupPhase, COMMIT_TYPES};
+use crate::app::{App, AssignPopup, AssignPopupPhase, Pane, SaveStatus, StartPopup, StartPopupPhase, COMMIT_TYPES};
 use crate::config::AiAgent;
 
 const LEFT_WIDTH: u16 = 60;
@@ -34,6 +34,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     if let Some(ref popup) = app.start_popup {
         draw_start_popup(frame, popup, size, &app.config.ai_agent);
+    }
+
+    if let Some(ref popup) = app.assign_popup {
+        draw_assign_popup(frame, popup, size);
     }
 }
 
@@ -674,6 +678,26 @@ fn draw_start_message(frame: &mut Frame, area: Rect, title: &str, body: &str, co
         .style(Style::default().fg(Color::White));
 
     frame.render_widget(content, popup_area);
+}
+
+fn draw_assign_popup(frame: &mut Frame, popup: &AssignPopup, area: Rect) {
+    let (title, body, color) = match &popup.phase {
+        AssignPopupPhase::Assigning => (
+            format!(" Assigning {} ", popup.ticket_key),
+            "Assigning and moving to In Progress...".to_string(),
+            Color::Yellow,
+        ),
+        AssignPopupPhase::Done { success, message, .. } => (
+            if *success {
+                format!(" {} ", popup.ticket_key)
+            } else {
+                format!(" Error — {} ", popup.ticket_key)
+            },
+            message.clone(),
+            if *success { Color::Green } else { Color::Red },
+        ),
+    };
+    draw_start_message(frame, area, &title, &body, color);
 }
 
 fn truncate(s: &str, max: usize) -> String {

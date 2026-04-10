@@ -59,6 +59,16 @@ pub enum SaveStatus {
     Error(String),
 }
 
+pub struct AssignPopup {
+    pub ticket_key: String,
+    pub phase: AssignPopupPhase,
+}
+
+pub enum AssignPopupPhase {
+    Assigning,
+    Done { success: bool, message: String, at: Instant },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TicketSort {
     Priority, // board rank order
@@ -131,6 +141,8 @@ pub struct App {
     projects_receiver: Option<mpsc::Receiver<anyhow::Result<Vec<JiraProject>>>>,
     tickets_receiver: Option<TicketsReceiver>,
     start_receiver: Option<mpsc::Receiver<crate::worktree::WorktreeProgress>>,
+    assign_receiver: Option<mpsc::Receiver<Result<(), String>>>,
+    pub assign_popup: Option<AssignPopup>,
     // Config
     #[allow(dead_code)]
     pub config: LazyJiraConfig,
@@ -205,6 +217,8 @@ impl App {
             projects_receiver: None,
             tickets_receiver: None,
             start_receiver: None,
+            assign_receiver: None,
+            assign_popup: None,
             config: LazyJiraConfig::load(),
             start_popup: None,
         }
@@ -635,6 +649,94 @@ impl App {
             return false;
         }
         self.current_ticket().is_some()
+    }
+
+    /// Assign ticket to current user, transition to "To Do", and copy ticket info to clipboard.
+    /// Works from the Tickets pane. Returns true if the action was initiated.
+    pub fn assign_current_ticket(&mut self) -> bool {
+        if self.active_pane != Pane::Tickets || self.columns.is_empty() {
+            return false;
+        }
+        let ticket = match self.current_ticket() {
+            Some(t) => t.clone(),
+            None => return false,
+        };
+
+        // Copy ticket info to clipboard (same as 'c' from Detail pane)
+        if let Some(text) = self.build_ticket_text() {
+            let _ = copy_to_clipboard(&text);
+        }
+
+        // Show popup
+        self.assign_popup = Some(AssignPopup {
+            ticket_key: ticket.key.clone(),
+            phase: AssignPopupPhase::Assigning,
+        });
+
+        // Spawn background assign + transition
+        let key = ticket.key.clone();
+        let (tx, rx) = mpsc::channel();
+        self.assign_receiver = Some(rx);
+        thread::spawn(move || {
+            let result = jira::assign_workitem(&key).map_err(|e| e.to_string());
+            let _ = tx.send(result);
+        });
+
+        true
+    }
+
+    /// Poll the background assign-ticket task.
+    pub fn poll_assign_ticket(&mut self) {
+        let rx = match &self.assign_receiver {
+            Some(rx) => rx,
+            None => return,
+        };
+        match rx.try_recv() {
+            Ok(Ok(())) => {
+                self.assign_receiver = None;
+                let ticket_key = self.assign_popup.as_ref().map(|p| p.ticket_key.clone());
+                if let Some(ref key) = ticket_key {
+                    self.detail_cache.remove(key);
+                }
+                if let Some(popup) = self.assign_popup.as_mut() {
+                    popup.phase = AssignPopupPhase::Done {
+                        success: true,
+                        message: "Assigned, moved to In Progress, copied to clipboard".into(),
+                        at: Instant::now(),
+                    };
+                }
+                self.refresh_workitems();
+            }
+            Ok(Err(e)) => {
+                self.assign_receiver = None;
+                if let Some(popup) = self.assign_popup.as_mut() {
+                    popup.phase = AssignPopupPhase::Done {
+                        success: false,
+                        message: format!("Error: {}", e),
+                        at: Instant::now(),
+                    };
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.assign_receiver = None;
+                self.assign_popup = None;
+            }
+        }
+    }
+
+    /// Auto-dismiss the assign popup 3 seconds after successful completion.
+    /// On error, the popup stays until dismissed by any key.
+    pub fn check_assign_popup_timeout(&mut self) {
+        if let Some(AssignPopup { phase: AssignPopupPhase::Done { success, at, .. }, .. }) = &self.assign_popup {
+            if *success && at.elapsed() >= Duration::from_secs(3) {
+                self.assign_popup = None;
+            }
+        }
+    }
+
+    pub fn dismiss_assign_popup(&mut self) {
+        self.assign_popup = None;
     }
 
     /// Opens the start-ticket popup. For bugs, always uses "fix".
