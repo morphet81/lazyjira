@@ -12,6 +12,7 @@ pub struct JiraProject {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct StatusCategory {
     pub id: u32,
     pub name: String,
@@ -21,6 +22,7 @@ pub struct StatusCategory {
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     pub name: String,
+    #[allow(dead_code)]
     pub status_category: StatusCategory,
 }
 
