@@ -189,7 +189,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
                         KeyCode::Down => app.epic_popup_down(),
                         KeyCode::Enter => {
                             if app.select_epic() {
-                                app.load_workitems();
+                                // Reset all columns and re-fetch current
+                                app.init_columns();
+                                app.load_column(app.column_index);
                             }
                         }
                         KeyCode::Esc => app.close_epic_popup(),
@@ -346,10 +348,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         app.poll_assign_ticket();
         app.check_assign_popup_timeout();
 
-        // Once projects finish loading for the first time, load tickets
+        // Once projects finish loading for the first time, init columns and load To Do
         if !projects_loaded && !app.projects.is_empty() && !had_projects {
             projects_loaded = true;
-            app.load_workitems();
+            app.init_columns();
+            app.load_column(0);
+            app.on_project_entered();
         }
 
         // Auto-refresh every 5 minutes

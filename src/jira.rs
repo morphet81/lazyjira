@@ -95,10 +95,20 @@ pub fn fetch_projects() -> Result<Vec<JiraProject>> {
     Ok(projects)
 }
 
-pub fn fetch_workitems(project_key: &str, epic_key: Option<&str>) -> Result<Vec<WorkItem>> {
+pub fn fetch_workitems_by_status(
+    project_key: &str,
+    status_category_id: u32,
+    epic_key: Option<&str>,
+) -> Result<Vec<WorkItem>> {
     let jql = match epic_key {
-        Some(key) => format!("project = {} AND parent = {} ORDER BY rank", project_key, key),
-        None => format!("project = {} ORDER BY rank", project_key),
+        Some(key) => format!(
+            "project = {} AND parent = {} AND statusCategory = {} ORDER BY rank",
+            project_key, key, status_category_id
+        ),
+        None => format!(
+            "project = {} AND statusCategory = {} ORDER BY rank",
+            project_key, status_category_id
+        ),
     };
     let json = run_acli(&[
         "jira",

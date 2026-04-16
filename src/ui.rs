@@ -120,8 +120,9 @@ fn draw_tickets(frame: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(border_style);
 
-    if app.loading_tickets {
-        let loading = Paragraph::new("Loading tickets...")
+    if app.is_current_column_loading() {
+        let msg = format!("Loading {}...", app.current_column_name());
+        let loading = Paragraph::new(msg)
             .block(block)
             .style(Style::default().fg(Color::Yellow));
         frame.render_widget(loading, area);

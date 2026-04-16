@@ -2,7 +2,7 @@ use crate::adf;
 use crate::config::LazyJiraConfig;
 use crate::jira::{self, JiraProject, WorkItem, WorkItemDetail};
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -86,10 +86,19 @@ impl TicketSort {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnLoadState {
+    NotLoaded,
+    Loading,
+    Loaded,
+}
+
 /// A board column derived from status categories.
 #[derive(Debug, Clone)]
 pub struct Column {
     pub name: String,
+    pub status_category_id: u32,
+    pub load_state: ColumnLoadState,
     pub items: Vec<WorkItem>,
     /// Items in original board rank order (for restoring priority sort).
     pub ranked_items: Vec<WorkItem>,
@@ -139,7 +148,7 @@ pub struct App {
     detail_cache: HashMap<String, WorkItemDetail>,
     // Background project/ticket loading
     projects_receiver: Option<mpsc::Receiver<anyhow::Result<Vec<JiraProject>>>>,
-    tickets_receiver: Option<TicketsReceiver>,
+    tickets_receivers: Vec<TicketsReceiver>,
     start_receiver: Option<mpsc::Receiver<crate::worktree::WorktreeProgress>>,
     assign_receiver: Option<mpsc::Receiver<Result<(), String>>>,
     pub assign_popup: Option<AssignPopup>,
@@ -152,8 +161,8 @@ pub struct App {
 
 struct TicketsReceiver {
     rx: mpsc::Receiver<anyhow::Result<Vec<WorkItem>>>,
+    column_index: usize,
     is_refresh: bool,
-    prev_column: usize,
     prev_ticket: usize,
 }
 
@@ -215,7 +224,7 @@ impl App {
             detail_queue: VecDeque::new(),
             detail_cache: HashMap::new(),
             projects_receiver: None,
-            tickets_receiver: None,
+            tickets_receivers: Vec::new(),
             start_receiver: None,
             assign_receiver: None,
             assign_popup: None,
@@ -258,95 +267,196 @@ impl App {
         }
     }
 
-    pub fn load_workitems(&mut self) {
-        if self.projects.is_empty() {
+    /// Pre-create the three standard columns (To Do, In Progress, Done) in NotLoaded state.
+    pub fn init_columns(&mut self) {
+        self.columns = vec![
+            Column {
+                name: "To Do".to_string(),
+                status_category_id: 2,
+                load_state: ColumnLoadState::NotLoaded,
+                items: Vec::new(),
+                ranked_items: Vec::new(),
+            },
+            Column {
+                name: "In Progress".to_string(),
+                status_category_id: 4,
+                load_state: ColumnLoadState::NotLoaded,
+                items: Vec::new(),
+                ranked_items: Vec::new(),
+            },
+            Column {
+                name: "Done".to_string(),
+                status_category_id: 3,
+                load_state: ColumnLoadState::NotLoaded,
+                items: Vec::new(),
+                ranked_items: Vec::new(),
+            },
+        ];
+        self.column_index = 0;
+        self.ticket_index = 0;
+        self.detail = None;
+        self.editable_fields.clear();
+        self.detail_mode = DetailMode::Viewing;
+        self.detail_cache.clear();
+        self.detail_queue.clear();
+        self.loading_detail = false;
+        self.tickets_receivers.clear();
+    }
+
+    /// Load a single column by index in a background thread.
+    pub fn load_column(&mut self, col_idx: usize) {
+        if self.projects.is_empty() || col_idx >= self.columns.len() {
             return;
         }
+        let col = &mut self.columns[col_idx];
+        if col.load_state == ColumnLoadState::Loading {
+            return;
+        }
+        let is_refresh = col.load_state == ColumnLoadState::Loaded;
+        let prev_ticket = if col_idx == self.column_index {
+            self.ticket_index
+        } else {
+            0
+        };
+        col.load_state = ColumnLoadState::Loading;
+
         let project_key = self.projects[self.project_index].key.clone();
-        self.status_message = format!("Loading tickets for {}...", project_key);
-        self.loading_tickets = true;
+        let status_cat_id = col.status_category_id;
         let epic = self.selected_epic.clone();
         let (tx, rx) = mpsc::channel();
-        self.tickets_receiver = Some(TicketsReceiver {
+
+        self.tickets_receivers.push(TicketsReceiver {
             rx,
-            is_refresh: false,
-            prev_column: 0,
-            prev_ticket: 0,
+            column_index: col_idx,
+            is_refresh,
+            prev_ticket,
         });
+
+        if col_idx == self.column_index {
+            self.status_message = format!("Loading {}...", col.name);
+        }
+
         thread::spawn(move || {
-            let _ = tx.send(jira::fetch_workitems(&project_key, epic.as_deref()));
+            let _ = tx.send(jira::fetch_workitems_by_status(
+                &project_key,
+                status_cat_id,
+                epic.as_deref(),
+            ));
         });
     }
 
-    fn handle_workitems_result(&mut self, items: Vec<WorkItem>, is_refresh: bool, prev_column: usize, prev_ticket: usize) {
-        self.build_columns(items);
+    /// Trigger a column load if not already loaded.
+    pub fn ensure_column_loaded(&mut self, col_idx: usize) {
+        if col_idx >= self.columns.len() {
+            return;
+        }
+        if self.columns[col_idx].load_state == ColumnLoadState::NotLoaded {
+            self.load_column(col_idx);
+        }
+    }
+
+    /// Called when loading completes for initial project entry.
+    pub fn on_project_entered(&mut self) {
+        self.active_pane = Pane::Tickets;
+        // Start background epic fetch if not already loaded
+        let project_key = self.projects[self.project_index].key.clone();
+        if self.epics.is_empty() && !self.loading_epics {
+            self.start_epic_fetch(&project_key);
+        }
+    }
+
+    fn handle_column_result(&mut self, col_idx: usize, items: Vec<WorkItem>, is_refresh: bool, prev_ticket: usize) {
+        if col_idx >= self.columns.len() {
+            return;
+        }
+        // Filter out epics
+        let filtered: Vec<WorkItem> = items
+            .into_iter()
+            .filter(|item| {
+                !item
+                    .fields
+                    .issuetype
+                    .as_ref()
+                    .map(|t| t.name.eq_ignore_ascii_case("epic"))
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        let col = &mut self.columns[col_idx];
+        col.ranked_items = filtered.clone();
+        col.items = filtered;
+        col.load_state = ColumnLoadState::Loaded;
+
+        // Apply current sort to this column
+        self.apply_sort_to_column(col_idx);
+
+        self.last_tickets_refresh = Some(Instant::now());
+
+        // Update status message
+        let count = self.columns[col_idx].items.len();
+        let col_name = self.columns[col_idx].name.clone();
         if is_refresh {
-            self.column_index = prev_column.min(self.columns.len().saturating_sub(1));
-            let ticket_count = self.current_tickets().len();
-            self.ticket_index = prev_ticket.min(ticket_count.saturating_sub(1));
-            self.last_tickets_refresh = Some(Instant::now());
-            self.status_message = format!(
-                "{} tickets in {} columns (refreshed)",
-                self.columns.iter().map(|c| c.items.len()).sum::<usize>(),
-                self.columns.len()
-            );
+            self.status_message = format!("{} tickets in {} (refreshed)", count, col_name);
         } else {
-            self.column_index = 0;
-            self.ticket_index = 0;
-            self.detail = None;
-            self.editable_fields.clear();
-            self.detail_mode = DetailMode::Viewing;
-            self.detail_cache.clear();
-            self.detail_queue.clear();
-            self.loading_detail = false;
-            self.active_pane = Pane::Tickets;
-            self.last_tickets_refresh = Some(Instant::now());
-            self.status_message = format!(
-                "{} tickets in {} columns",
-                self.columns.iter().map(|c| c.items.len()).sum::<usize>(),
-                self.columns.len()
-            );
-            // Start background epic fetch if not already loaded
-            let project_key = self.projects[self.project_index].key.clone();
-            if self.epics.is_empty() && !self.loading_epics {
-                self.start_epic_fetch(&project_key);
+            self.status_message = format!("{} tickets in {}", count, col_name);
+        }
+
+        // Restore ticket index if this is the current column
+        if col_idx == self.column_index {
+            if is_refresh {
+                let ticket_count = self.columns[col_idx].items.len();
+                self.ticket_index = prev_ticket.min(ticket_count.saturating_sub(1));
+            } else {
+                self.ticket_index = 0;
             }
-            // Auto-fetch detail for first ticket
             self.request_current_detail();
         }
     }
 
     pub fn poll_tickets(&mut self) {
-        let tr = match &self.tickets_receiver {
-            Some(tr) => tr,
-            None => return,
-        };
-        match tr.rx.try_recv() {
-            Ok(Ok(items)) => {
-                let is_refresh = tr.is_refresh;
-                let prev_column = tr.prev_column;
-                let prev_ticket = tr.prev_ticket;
-                self.tickets_receiver = None;
-                self.loading_tickets = false;
-                self.handle_workitems_result(items, is_refresh, prev_column, prev_ticket);
-            }
-            Ok(Err(e)) => {
-                let is_refresh = tr.is_refresh;
-                self.tickets_receiver = None;
-                self.loading_tickets = false;
-                if is_refresh {
-                    self.status_message = format!("Refresh error: {}", e);
-                } else {
-                    self.columns.clear();
-                    self.status_message = format!("Error: {}", e);
+        if self.tickets_receivers.is_empty() {
+            return;
+        }
+        let mut completed = Vec::new();
+        for (i, tr) in self.tickets_receivers.iter().enumerate() {
+            match tr.rx.try_recv() {
+                Ok(result) => {
+                    completed.push((i, tr.column_index, tr.is_refresh, tr.prev_ticket, result));
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    completed.push((
+                        i,
+                        tr.column_index,
+                        tr.is_refresh,
+                        tr.prev_ticket,
+                        Err(anyhow::anyhow!("disconnected")),
+                    ));
                 }
             }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.loading_tickets = false;
-                self.tickets_receiver = None;
+        }
+        // Remove in reverse order to preserve indices
+        for (i, col_idx, is_refresh, prev_ticket, result) in completed.into_iter().rev() {
+            self.tickets_receivers.remove(i);
+            match result {
+                Ok(items) => self.handle_column_result(col_idx, items, is_refresh, prev_ticket),
+                Err(e) => {
+                    if col_idx < self.columns.len() {
+                        self.columns[col_idx].load_state = ColumnLoadState::NotLoaded;
+                    }
+                    if is_refresh {
+                        self.status_message = format!("Refresh error: {}", e);
+                    } else {
+                        self.status_message = format!("Error loading {}: {}",
+                            if col_idx < self.columns.len() { &self.columns[col_idx].name } else { "column" },
+                            e
+                        );
+                    }
+                }
             }
         }
+        // Update loading_tickets for UI
+        self.loading_tickets = !self.tickets_receivers.is_empty();
     }
 
     fn start_epic_fetch(&mut self, project_key: &str) {
@@ -385,84 +495,30 @@ impl App {
         }
     }
 
-    /// Refresh work items while preserving current column and ticket selection.
-    /// The existing ticket list stays visible until the refresh completes.
+    /// Refresh all previously loaded columns while preserving selection.
     pub fn refresh_workitems(&mut self) {
         if self.projects.is_empty() || self.columns.is_empty() {
             return;
         }
-        let project_key = self.projects[self.project_index].key.clone();
-        let prev_column = self.column_index;
-        let prev_ticket = self.ticket_index;
-        let epic = self.selected_epic.clone();
-        let (tx, rx) = mpsc::channel();
-        self.tickets_receiver = Some(TicketsReceiver {
-            rx,
-            is_refresh: true,
-            prev_column,
-            prev_ticket,
-        });
-        thread::spawn(move || {
-            let _ = tx.send(jira::fetch_workitems(&project_key, epic.as_deref()));
-        });
+        for i in 0..self.columns.len() {
+            if self.columns[i].load_state == ColumnLoadState::Loaded {
+                self.load_column(i);
+            }
+        }
     }
 
     pub fn needs_auto_refresh(&self) -> bool {
-        if self.columns.is_empty() || self.is_editing() {
+        if self.is_editing() {
+            return false;
+        }
+        let any_loaded = self.columns.iter().any(|c| c.load_state == ColumnLoadState::Loaded);
+        if !any_loaded {
             return false;
         }
         match self.last_tickets_refresh {
             Some(last) => last.elapsed() >= AUTO_REFRESH_INTERVAL,
             None => false,
         }
-    }
-
-    fn build_columns(&mut self, items: Vec<WorkItem>) {
-        let mut groups: BTreeMap<u32, (String, Vec<WorkItem>)> = BTreeMap::new();
-
-        for item in items {
-            let is_epic = item
-                .fields
-                .issuetype
-                .as_ref()
-                .map(|t| t.name.eq_ignore_ascii_case("epic"))
-                .unwrap_or(false);
-            if is_epic {
-                continue;
-            }
-            let cat_id = item.fields.status.status_category.id;
-            let cat_name = item.fields.status.status_category.name.clone();
-            groups
-                .entry(cat_id)
-                .or_insert_with(|| (cat_name, Vec::new()))
-                .1
-                .push(item);
-        }
-
-        let order = |id: &u32| -> u32 {
-            match id {
-                2 => 0,
-                4 => 1,
-                3 => 2,
-                other => 3 + other,
-            }
-        };
-
-        let mut sorted_keys: Vec<u32> = groups.keys().cloned().collect();
-        sorted_keys.sort_by_key(|k| order(k));
-
-        self.columns = sorted_keys
-            .into_iter()
-            .map(|id| {
-                let (name, items) = groups.remove(&id).unwrap();
-                Column {
-                    name,
-                    ranked_items: items.clone(),
-                    items,
-                }
-            })
-            .collect();
-        self.apply_sort();
     }
 
     pub fn set_ticket_sort(&mut self, sort: TicketSort) {
@@ -485,6 +541,32 @@ impl App {
                 }
             }
         }
+    }
+
+    fn apply_sort_to_column(&mut self, col_idx: usize) {
+        if col_idx >= self.columns.len() {
+            return;
+        }
+        let column = &mut self.columns[col_idx];
+        match self.ticket_sort {
+            TicketSort::Priority => {
+                column.items = column.ranked_items.clone();
+            }
+            TicketSort::KeyAsc => {
+                column.items.sort_by(|a, b| cmp_issue_key(&a.key, &b.key));
+            }
+            TicketSort::KeyDesc => {
+                column.items.sort_by(|a, b| cmp_issue_key(&b.key, &a.key));
+            }
+        }
+    }
+
+    /// Check if the current column is still loading.
+    pub fn is_current_column_loading(&self) -> bool {
+        if self.columns.is_empty() {
+            return false;
+        }
+        self.columns[self.column_index].load_state == ColumnLoadState::Loading
     }
 
     pub fn load_detail(&mut self) {
@@ -1036,6 +1118,7 @@ impl App {
             self.ticket_index = 0;
             self.detail = None;
             self.editable_fields.clear();
+            self.ensure_column_loaded(self.column_index);
         }
     }
 
@@ -1045,22 +1128,21 @@ impl App {
             self.ticket_index = 0;
             self.detail = None;
             self.editable_fields.clear();
+            self.ensure_column_loaded(self.column_index);
         }
     }
 
     pub fn enter(&mut self) -> bool {
         match self.active_pane {
             Pane::Projects if !self.projects.is_empty() => {
-                self.loading_tickets = true;
-                self.columns.clear();
-                self.detail = None;
-                self.editable_fields.clear();
                 self.epics.clear();
                 self.selected_epic = None;
                 self.loading_epics = false;
                 self.epics_receiver = None;
-                self.active_pane = Pane::Tickets;
-                true
+                self.init_columns();
+                self.load_column(0);
+                self.on_project_entered();
+                false // no longer needs perform_pending_load
             }
             Pane::Tickets if self.current_ticket().is_some() => {
                 self.active_pane = Pane::Detail;
@@ -1077,9 +1159,6 @@ impl App {
     }
 
     pub fn perform_pending_load(&mut self) {
-        if self.loading_tickets {
-            self.load_workitems();
-        }
         if self.loading_detail {
             self.load_detail();
             self.loading_detail = false;
